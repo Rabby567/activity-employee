@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ActivityTrack</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f8f9fb;--sidebar:#fff;--card:#fff;
+  --border:#e8eaed;--border2:#d0d4da;
+  --text:#111418;--text2:#5f6470;--text3:#9ba1ad;
+  --green:#15803d;--green-bg:#dcfce7;
+  --amber:#b45309;--amber-bg:#fef3c7;
+  --red:#b91c1c;--red-bg:#fee2e2;
+  --blue:#1d4ed8;--blue-bg:#dbeafe;
+  --radius:10px;--radius-sm:6px;--radius-lg:14px;
+  --sb:220px;
+}
+.dark{
+  --bg:#0d0f12;--sidebar:#13161b;--card:#1a1d23;
+  --border:#272b33;--border2:#353a44;
+  --text:#e8eaf0;--text2:#8b91a0;--text3:#555b68;
+  --green-bg:#14532d;--amber-bg:#451a03;--red-bg:#450a0a;--blue-bg:#1e3a5f;
+}
+html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+.app{display:flex;min-height:100vh}
+/* SIDEBAR */
+.sidebar{width:var(--sb);background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100%;z-index:100}
+.logo{padding:20px 18px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)}
+.logo-mark{width:30px;height:30px;background:var(--text);border-radius:8px;display:grid;place-items:center}
+.logo-mark svg{width:16px;height:16px;fill:var(--sidebar)}
+.logo-text{font-size:15px;font-weight:600;letter-spacing:-.3px}
+.nav{padding:10px;flex:1}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;color:var(--text2);transition:all .15s;margin-bottom:1px}
+.nav-item:hover{background:var(--bg);color:var(--text)}
+.nav-item.active{background:var(--bg);color:var(--text);font-weight:500}
+.nav-item svg{width:16px;height:16px;flex-shrink:0}
+.sidebar-foot{padding:12px 14px 18px;border-top:1px solid var(--border)}
+.foot-btn{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;color:var(--text2);transition:all .15s}
+.foot-btn:hover{background:var(--bg);color:var(--text)}
+.foot-btn svg{width:15px;height:15px}
+/* MAIN */
+.main{margin-left:var(--sb);flex:1;background:var(--bg);min-height:100vh}
+/* TOPBAR */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:0 28px;height:60px;border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:0;z-index:50}
+.topbar-left .page-title{font-size:18px;font-weight:600;letter-spacing:-.4px}
+.topbar-left .page-sub{font-size:12px;color:var(--text2);margin-top:1px}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.live-pill{display:flex;align-items:center;gap:7px;background:#f0fdf4;border:1px solid #bbf7d0;padding:5px 12px;border-radius:20px;font-size:12px;color:var(--green);font-weight:500}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+/* CONTENT */
+.content{padding:24px 28px}
+/* METRICS */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+.metric-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;display:flex;justify-content:space-between;align-items:center}
+.metric-label{font-size:12px;color:var(--text2);font-weight:500;margin-bottom:5px}
+.metric-value{font-size:26px;font-weight:600;letter-spacing:-.5px;line-height:1}
+.metric-icon{width:42px;height:42px;border-radius:50%;display:grid;place-items:center}
+.metric-icon svg{width:20px;height:20px}
+/* CARD */
+.table-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:18px}
+.table-hdr{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--border)}
+.table-title{font-size:14px;font-weight:600}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;padding:9px 18px;border-bottom:1px solid var(--border);background:var(--bg)}
+td{padding:13px 18px;border-bottom:1px solid var(--border);vertical-align:middle;font-size:13px}
+tr:last-child td{border-bottom:none}
+.tr-click{cursor:pointer;transition:background .12s}
+.tr-click:hover td{background:var(--bg)}
+/* BADGES */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.badge-green{background:var(--green-bg);color:var(--green)}
+.badge-amber{background:var(--amber-bg);color:var(--amber)}
+.badge-red{background:var(--red-bg);color:var(--red)}
+.badge-blue{background:var(--blue-bg);color:var(--blue)}
+.badge-gray{background:var(--bg);color:var(--text2);border:1px solid var(--border)}
+.dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+.dot-green{background:var(--green)}.dot-amber{background:var(--amber)}.dot-gray{background:var(--text3)}
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:8px 15px;border-radius:var(--radius-sm);border:1px solid var(--border2);background:transparent;cursor:pointer;font-size:13px;font-weight:500;color:var(--text);font-family:'DM Sans',sans-serif;transition:all .15s;white-space:nowrap}
+.btn:hover{background:var(--bg)}
+.btn-dark{background:var(--text);color:var(--sidebar);border-color:var(--text)}
+.btn-dark:hover{opacity:.88}
+.btn-red{background:#dc2626;color:#fff;border-color:#dc2626}
+.btn-red:hover{background:#b91c1c}
+.btn-sm{padding:5px 10px;font-size:12px}
+.btn svg{width:14px;height:14px}
+/* AVATAR */
+.avatar{width:32px;height:32px;border-radius:50%;background:var(--blue-bg);color:var(--blue);display:grid;place-items:center;font-size:11px;font-weight:700;flex-shrink:0}
+/* SEARCH */
+.search-wrap{display:flex;align-items:center;gap:8px;border:1px solid var(--border2);border-radius:var(--radius-sm);padding:7px 11px;background:var(--card)}
+.search-wrap input{border:none;outline:none;background:transparent;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;width:180px}
+.search-wrap input::placeholder{color:var(--text3)}
+.search-wrap svg{width:14px;height:14px;color:var(--text3);flex-shrink:0}
+/* TABS */
+.tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:18px}
+.tab{padding:10px 16px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text2);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--text);border-bottom-color:var(--text)}
+/* INFO STRIP */
+.info-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+.info-box{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px}
+.info-box-label{font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px;display:flex;align-items:center;gap:5px}
+.info-box-label svg{width:12px;height:12px}
+.info-box-val{font-size:13px;font-weight:500}
+/* ACTIVITY */
+.act-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border)}
+.act-item:last-child{border-bottom:none}
+.act-app{font-size:13px;font-weight:500;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.act-time{font-size:11px;color:var(--text3);font-family:'DM Mono',monospace;margin-top:2px}
+.act-right{display:flex;align-items:center;gap:10px;flex-shrink:0}
+/* SETTINGS */
+.settings-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px 22px;margin-bottom:14px}
+.settings-card-title{font-size:14px;font-weight:600;margin-bottom:3px}
+.settings-card-sub{font-size:12px;color:var(--text2);margin-bottom:16px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;font-weight:500;color:var(--text2);margin-bottom:4px}
+.field input{width:100%;padding:8px 11px;border:1px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none}
+.field input:focus{border-color:var(--text)}
+.toggle-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0}
+.toggle-track{width:38px;height:22px;border-radius:11px;background:var(--border2);position:relative;cursor:pointer;transition:background .2s}
+.toggle-track.on{background:#15803d}
+.toggle-thumb{width:18px;height:18px;background:#fff;border-radius:50%;position:absolute;top:2px;left:2px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.toggle-track.on .toggle-thumb{left:18px}
+.code-block{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-family:'DM Mono',monospace;font-size:12px;color:var(--text2);line-height:1.7;margin-top:8px;white-space:pre-wrap;word-break:break-all}
+/* AGENT */
+.agent-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+.agent-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px}
+.agent-card-title{font-size:14px;font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:8px}
+.agent-card-sub{font-size:12px;color:var(--text2);margin-bottom:14px}
+.select-box{width:100%;padding:8px 11px;border:1px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font-size:13px;font-family:'DM Sans',sans-serif;outline:none;cursor:pointer;margin-bottom:10px}
+.step-item{display:flex;gap:12px;margin-bottom:14px;align-items:flex-start}
+.step-num{width:26px;height:26px;border-radius:50%;background:var(--text);color:var(--sidebar);display:grid;place-items:center;font-size:12px;font-weight:700;flex-shrink:0}
+.step-title{font-size:13px;font-weight:600}
+.step-sub{font-size:12px;color:var(--text2);margin-top:2px;line-height:1.5}
+.pkg-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border)}
+.pkg-item:last-child{border-bottom:none}
+.pkg-icon{width:32px;height:32px;border-radius:7px;background:var(--bg);border:1px solid var(--border);display:grid;place-items:center;font-size:14px;flex-shrink:0}
+.pkg-name{font-size:13px;font-weight:600;font-family:'DM Mono',monospace}
+.pkg-desc{font-size:12px;color:var(--text2);margin-top:1px}
+/* ANALYTICS */
+.analytics-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+.chart-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px}
+.chart-title{font-size:13px;font-weight:600;margin-bottom:12px}
+.bar-chart{display:flex;align-items:flex-end;gap:5px;height:130px}
+.bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.bar-fill{width:100%;border-radius:3px 3px 0 0;min-height:3px}
+.bar-lbl{font-size:10px;color:var(--text3)}
+.bar-val{font-size:10px;color:var(--text2)}
+.rank-bar-wrap{display:flex;align-items:center;gap:8px}
+.rank-bar-track{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+.rank-bar-fill{height:100%;border-radius:3px}
+/* FILTERS */
+.filter-row{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;align-items:center}
+.pill{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border2);color:var(--text2);background:transparent;font-family:'DM Sans',sans-serif;transition:all .15s}
+.pill.active{background:var(--text);color:var(--sidebar);border-color:var(--text)}
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:center;justify-content:center}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px;width:420px;max-width:90vw}
+.modal-title{font-size:15px;font-weight:600;margin-bottom:16px}
+.modal-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+/* CONFIG BANNER */
+.config-banner{background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--radius-lg);padding:14px 18px;margin-bottom:20px;display:flex;align-items:flex-start;gap:12px}
+.config-banner svg{width:18px;height:18px;color:#b45309;flex-shrink:0;margin-top:1px}
+.config-banner-text{font-size:13px;color:#92400e;line-height:1.6}
+.config-banner strong{font-weight:600}
+/* LOADING */
+.loading{display:flex;align-items:center;justify-content:center;padding:40px;gap:10px;color:var(--text3);font-size:13px}
+.spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--text2);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* SCREENSHOT GRID */
+.screenshot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:4px 0}
+.screenshot-item{border-radius:var(--radius-sm);overflow:hidden;border:1px solid var(--border);cursor:pointer;transition:opacity .15s}
+.screenshot-item:hover{opacity:.85}
+.screenshot-item img{width:100%;height:120px;object-fit:cover;display:block}
+.screenshot-time{font-size:10px;color:var(--text3);padding:5px 7px;font-family:'DM Mono',monospace}
+/* TOAST */
+.toast{position:fixed;bottom:22px;right:22px;background:var(--text);color:var(--sidebar);padding:10px 16px;border-radius:var(--radius-sm);font-size:13px;z-index:500;font-weight:500;animation:slideup .2s ease;max-width:320px}
+@keyframes slideup{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.back-btn{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer;margin-bottom:16px;transition:color .15s}
+.back-btn:hover{color:var(--text)}
+.back-btn svg{width:15px;height:15px}
+.empty{text-align:center;padding:36px;color:var(--text3);font-size:13px}
+@media(max-width:768px){.metrics{grid-template-columns:1fr 1fr}.analytics-grid{grid-template-columns:1fr}.agent-grid{grid-template-columns:1fr}.info-strip{grid-template-columns:1fr}.sidebar{display:none}.main{margin-left:0}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="logo">
+      <div class="logo-mark"><svg viewBox="0 0 24 24"><path d="M3 3h7v7H3zm11 0h7v7h-7zM3 14h7v7H3zm11 0h7v7h-7z"/></svg></div>
+      <span class="logo-text">ActivityTrack</span>
+    </div>
+    <nav class="nav">
+      <div class="nav-item active" data-page="dashboard" onclick="nav('dashboard')">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>Dashboard
+      </div>
+      <div class="nav-item" data-page="employees" onclick="nav('employees')">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>Employees
+      </div>
+      <div class="nav-item" data-page="analytics" onclick="nav('analytics')">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>Analytics
+      </div>
+      <div class="nav-item" data-page="agentdownload" onclick="nav('agentdownload')">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Agent Download
+      </div>
+      <div class="nav-item" data-page="settings" onclick="nav('settings')">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M20 12h2M2 12h2M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41"/></svg>Settings
+      </div>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="foot-btn" onclick="toggleDark()">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>Dark Mode
+      </div>
+      <div class="foot-btn" onclick="signOut()">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Sign Out
+      </div>
+    </div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+<div class="modal-bg" id="modal" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal-inner"></div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════
+//  CONFIGURATION — Replace with your Supabase values
+// ══════════════════════════════════════════════════
+const SUPABASE_URL      = localStorage.getItem('at_url')  || '';
+const SUPABASE_ANON_KEY = localStorage.getItem('at_key')  || '';
+// ══════════════════════════════════════════════════
+
+const STORE = 'at_state_v2';
+
+function loadState(){try{return JSON.parse(localStorage.getItem(STORE)||'null');}catch(e){return null;}}
+function saveState(s){localStorage.setItem(STORE,JSON.stringify(s));}
+
+let S = loadState() || {dark:false, page:'dashboard', empView:'list', selectedEmp:null, empTab:'activity'};
+let refreshTimer = null;
+
+// ── SUPABASE API ──────────────────────────────────
+async function sb(method, path, body=null, params={}){
+  if(!SUPABASE_URL||!SUPABASE_ANON_KEY) return null;
+  const url = new URL(SUPABASE_URL+'/rest/v1/'+path);
+  Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,v));
+  const opts = {
+    method,
+    headers:{
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer '+SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': method==='POST'?'return=representation':'',
+    }
+  };
+  if(body) opts.body = JSON.stringify(body);
+  try{
+    const r = await fetch(url.toString(), opts);
+    if(!r.ok){
+      const err = await r.text();
+      console.error('Supabase error:', r.status, err);
+      return null;
+    }
+    const ct = r.headers.get('content-type')||'';
+    return ct.includes('json') ? await r.json() : null;
+  }catch(e){
+    console.error('Fetch error:', e);
+    return null;
+  }
+}
+
+const isConfigured = ()=> SUPABASE_URL&&SUPABASE_ANON_KEY&&!SUPABASE_URL.includes('YOUR_PROJECT');
+
+// ── DATA FETCHING ─────────────────────────────────
+async function fetchEmployees(){
+  if(!isConfigured()) return demoEmployees();
+  const data = await sb('GET','employees',null,{select:'*',order:'created_at.asc'});
+  return data || demoEmployees();
+}
+
+async function fetchActivity(empId, limit=30){
+  if(!isConfigured()) return demoActivity(empId);
+  const data = await sb('GET','activity_logs',null,{
+    select:'*', employee_id:`eq.${empId}`, order:'logged_at.desc', limit
+  });
+  return data || [];
+}
+
+async function fetchScreenshots(empId, limit=12){
+  if(!isConfigured()) return [];
+  const data = await sb('GET','screenshots',null,{
+    select:'*', employee_id:`eq.${empId}`, order:'taken_at.desc', limit
+  });
+  return data || [];
+}
+
+async function fetchAnalytics(){
+  if(!isConfigured()) return demoAnalytics();
+  const emps = await fetchEmployees();
+  const weekAgo = new Date(Date.now()-7*24*3600*1000).toISOString();
+  const logs = await sb('GET','activity_logs',null,{
+    select:'employee_id,status,duration_seconds,logged_at,app_name',
+    logged_at:`gte.${weekAgo}`, order:'logged_at.desc'
+  });
+  return {emps, logs: logs||[]};
+}
+
+async function addEmployee(data){
+  if(!isConfigured()){toast('Configure Supabase first');return false;}
+  const apiKey = 'sk-act-'+Math.random().toString(36).slice(2,14);
+  const res = await sb('POST','employees',{...data, api_key:apiKey, status:'offline', current_app:''});
+  return res;
+}
+
+async function deleteEmployee(id){
+  if(!isConfigured()){toast('Configure Supabase first');return false;}
+  await sb('DELETE','employees',null,{id:`eq.${id}`});
+  return true;
+}
+
+// ── DEMO DATA ──────────────────────────────────────
+function demoEmployees(){
+  return [
+    {id:'demo-1',name:'Toufiq Ahmed',device_id:'DXE30',email:'toufiq@company.com',department:'Engineering',status:'online',current_app:'Hosting employee activity - Claude - Google Chrome',last_seen:new Date().toISOString(),api_key:'sk-act-toufiq-demo'},
+    {id:'demo-2',name:'Arif Hossain',device_id:'WS-22',email:'arif@company.com',department:'Design',status:'idle',current_app:'Microsoft Excel - Q2 Report.xlsx',last_seen:new Date(Date.now()-5*60000).toISOString(),api_key:'sk-act-arif-demo'},
+    {id:'demo-3',name:'Nusrat Jahan',device_id:'NB-07',email:'nusrat@company.com',department:'HR',status:'offline',current_app:'',last_seen:new Date(Date.now()-2*3600000).toISOString(),api_key:'sk-act-nusrat-demo'},
+  ];
+}
+function demoActivity(){
+  const apps=['Google Chrome - Gmail','VS Code - App.tsx','Microsoft Excel','Outlook - Inbox','Microsoft Teams'];
+  return Array.from({length:12},(_,i)=>({
+    id:'a'+i, app_name:apps[i%apps.length], status:i%4===0?'idle':'online',
+    duration_seconds:Math.floor(Math.random()*600+60),
+    logged_at:new Date(Date.now()-i*8*60000).toISOString()
+  }));
+}
+function demoAnalytics(){
+  return {emps:demoEmployees(),logs:demoActivity()};
+}
+
+// ── HELPERS ──────────────────────────────────────
+function ini(name){const p=(name||'?').trim().split(' ');return(p[0][0]+(p[1]?p[1][0]:'')).toUpperCase();}
+function timeAgo(iso){
+  if(!iso) return 'never';
+  const s=Math.floor((Date.now()-new Date(iso))/1000);
+  if(s<60) return 'less than a minute ago';
+  if(s<3600) return Math.floor(s/60)+'m ago';
+  if(s<86400) return Math.floor(s/3600)+'h ago';
+  return Math.floor(s/86400)+'d ago';
+}
+function fmtDur(secs){if(!secs||secs<1)return '0m';if(secs<60)return secs+'s';if(secs<3600)return Math.floor(secs/60)+'m';return (secs/3600).toFixed(1)+'h';}
+function fmtTime(iso){if(!iso)return '';return new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'});}
+function statusBadge(s){
+  if(s==='online') return `<span class="badge badge-green"><span class="dot dot-green"></span>Online</span>`;
+  if(s==='idle')   return `<span class="badge badge-amber"><span class="dot dot-amber"></span>Idle</span>`;
+  return `<span class="badge badge-gray"><span class="dot dot-gray"></span>Offline</span>`;
+}
+function toast(msg,dur=2500){
+  document.querySelectorAll('.toast').forEach(t=>t.remove());
+  const t=document.createElement('div');t.className='toast';t.textContent=msg;
+  document.body.appendChild(t);setTimeout(()=>t.remove(),dur);
+}
+function configBanner(){
+  if(isConfigured()) return '';
+  return `<div class="config-banner">
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <div class="config-banner-text"><strong>Demo Mode:</strong> Go to <strong>Settings → Supabase Config</strong> and enter your Supabase URL and Anon Key to connect your real database. Data shown below is sample data.</div>
+  </div>`;
+}
+
+// ── NAVIGATION ──────────────────────────────────
+function nav(page){
+  S.page=page; S.empView='list'; saveState(S);
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
+  clearInterval(refreshTimer);
+  renderMain();
+  if(page==='dashboard') refreshTimer=setInterval(renderMain,15000);
+}
+function toggleDark(){S.dark=!S.dark;document.body.classList.toggle('dark',S.dark);saveState(S);}
+function signOut(){if(confirm('Sign out?')){localStorage.removeItem('at_url');localStorage.removeItem('at_key');location.reload();}}
+
+// ── RENDER MAIN ──────────────────────────────────
+async function renderMain(){
+  const el=document.getElementById('main');
+  el.innerHTML=`<div class="loading"><div class="spinner"></div>Loading...</div>`;
+  const p=S.page;
+  if(p==='dashboard') el.innerHTML=await renderDashboard();
+  else if(p==='employees') el.innerHTML = S.empView==='detail' ? await renderEmpDetail() : await renderEmployees();
+  else if(p==='analytics') el.innerHTML=await renderAnalytics();
+  else if(p==='agentdownload') el.innerHTML=renderAgentDownload();
+  else if(p==='settings') el.innerHTML=renderSettings();
+  attachHandlers();
+}
+
+// ── DASHBOARD ──────────────────────────────────
+async function renderDashboard(){
+  const emps = await fetchEmployees();
+  const online=emps.filter(e=>e.status==='online').length;
+  const idle=emps.filter(e=>e.status==='idle').length;
+  const offline=emps.filter(e=>e.status==='offline').length;
+  const rows=emps.map(e=>`<tr class="tr-click" onclick="openEmp('${e.id}')">
+    <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar">${ini(e.name)}</div>
+      <div><div style="font-weight:500">${e.name}</div><div style="font-size:11px;color:var(--text3)">${e.device_id}</div></div></div></td>
+    <td>${statusBadge(e.status)}</td>
+    <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);font-size:12px">${e.current_app||'—'}</td>
+    <td style="color:var(--text2);font-size:12px">${e.device_id}</td>
+    <td style="color:var(--blue);font-size:12px">${timeAgo(e.last_seen)}</td>
+  </tr>`).join('');
+  return `
+  <div class="topbar"><div class="topbar-left"><div class="page-title">Dashboard</div><div class="page-sub">Monitor employee activity in real-time</div></div>
+    <div class="topbar-right"><div class="live-pill"><span class="pulse"></span>Live</div>
+      <button class="btn btn-sm" onclick="renderMain()"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button>
+    </div></div>
+  <div class="content">${configBanner()}
+    <div class="metrics">
+      <div class="metric-card"><div><div class="metric-label">Total Employees</div><div class="metric-value">${emps.length}</div></div><div class="metric-icon" style="background:var(--bg)"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div></div>
+      <div class="metric-card"><div><div class="metric-label">Online</div><div class="metric-value" style="color:var(--green)">${online}</div></div><div class="metric-icon" style="background:var(--green-bg)"><svg fill="none" stroke="var(--green)" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div></div>
+      <div class="metric-card"><div><div class="metric-label">Idle</div><div class="metric-value" style="color:var(--amber)">${idle}</div></div><div class="metric-icon" style="background:var(--amber-bg)"><svg fill="none" stroke="var(--amber)" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div></div>
+      <div class="metric-card"><div><div class="metric-label">Offline</div><div class="metric-value" style="color:var(--red)">${offline}</div></div><div class="metric-icon" style="background:var(--red-bg)"><svg fill="none" stroke="var(--red)" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div></div>
+    </div>
+    <div class="table-card"><div class="table-hdr"><div class="table-title">Employee Activity</div></div>
+      <table><thead><tr><th>Employee</th><th>Status</th><th>Current App</th><th>Device</th><th>Last Seen</th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="5"><div class="empty">No employees yet. Add one in the Employees page.</div></td></tr>'}</tbody></table>
+    </div></div>`;
+}
+
+// ── EMPLOYEES ──────────────────────────────────
+async function renderEmployees(){
+  const emps = await fetchEmployees();
+  const q=(S.search||'').toLowerCase();
+  const list=emps.filter(e=>!q||e.name.toLowerCase().includes(q)||e.device_id.toLowerCase().includes(q));
+  const rows=list.map(e=>`<tr class="tr-click" onclick="openEmp('${e.id}')">
+    <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar">${ini(e.name)}</div>
+      <div><div style="font-weight:500">${e.name}</div><div style="font-size:11px;color:var(--text3)">${e.device_id}</div></div></div></td>
+    <td>${statusBadge(e.status)}</td>
+    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);font-size:12px">${e.current_app||'—'}</td>
+    <td style="color:var(--text2);font-size:12px">${e.device_id}</td>
+    <td style="color:var(--blue);font-size:12px">${timeAgo(e.last_seen)}</td>
+  </tr>`).join('');
+  return `
+  <div class="topbar"><div class="topbar-left"><div class="page-title">Employees</div><div class="page-sub">Manage and monitor your team</div></div>
+    <div class="topbar-right"><button class="btn btn-dark" onclick="showAddEmp()"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Employee</button></div></div>
+  <div class="content">${configBanner()}
+    <div class="table-card"><div class="table-hdr"><div class="table-title">All Employees</div>
+      <div class="search-wrap"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="srch" placeholder="Search employees..." value="${S.search||''}" oninput="S.search=this.value;renderMain()"/></div></div>
+      <table><thead><tr><th>Employee</th><th>Status</th><th>Current App</th><th>Device</th><th>Last Seen</th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="5"><div class="empty">No employees found</div></td></tr>'}</tbody></table>
+    </div></div>`;
+}
+
+async function renderEmpDetail(){
+  const emps=await fetchEmployees();
+  const e=emps.find(x=>x.id===S.selectedEmp);
+  if(!e){S.empView='list';return renderEmployees();}
+
+  const logs=await fetchActivity(e.id);
+  const shots=await fetchScreenshots(e.id);
+
+  const actTab=`<div>${logs.map(a=>`<div class="act-item">
+    <div><div class="act-app">${a.app_name}</div><div class="act-time">${fmtTime(a.logged_at)}</div></div>
+    <div class="act-right">${statusBadge(a.status)}<span style="font-size:12px;color:var(--text3);font-family:'DM Mono',monospace">${fmtDur(a.duration_seconds)}</span></div>
+  </div>`).join('')}${!logs.length?'<div class="empty">No activity recorded yet</div>':''}</div>`;
+
+  const appMap={};
+  logs.forEach(l=>{const k=l.app_name.split(' - ')[0];appMap[k]=(appMap[k]||0)+l.duration_seconds;});
+  const topApps=Object.entries(appMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const maxSec=topApps[0]?.[1]||1;
+  const chartTab=`<div>
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px">App Usage (by duration)</div>
+    <div class="bar-chart">${topApps.map(([app,sec])=>{
+      const h=Math.round(sec/maxSec*110);
+      return `<div class="bar-col"><div class="bar-val">${fmtDur(sec)}</div>
+        <div class="bar-fill" style="height:${h}px;background:var(--text);opacity:.75"></div>
+        <div class="bar-lbl">${app.slice(0,10)}</div></div>`;
+    }).join('')}${!topApps.length?'<div class="empty">No data yet</div>':''}</div>
+  </div>`;
+
+  const shotTab = shots.length
+    ? `<div class="screenshot-grid">${shots.map(s=>`<div class="screenshot-item">
+        <img src="${s.file_url}" alt="screenshot" onerror="this.src='data:image/svg+xml,<svg viewBox=\\'0 0 100 60\\'><rect width=\\'100\\' height=\\'60\\'  fill=\\'%23e5e7eb\\'/><text x=\\'50\\' y=\\'35\\' text-anchor=\\'middle\\' font-size=\\'10\\' fill=\\'%239ca3af\\'>No image</text></svg>'"/>
+        <div class="screenshot-time">${fmtTime(s.taken_at)}</div>
+      </div>`).join('')}</div>`
+    : `<div class="empty">No screenshots yet. Screenshots are taken automatically by the desktop agent every 5 minutes.</div>`;
+
+  const tabContent={activity:actTab, charts:chartTab, screenshots:shotTab}[S.empTab]||actTab;
+
+  return `
+  <div class="topbar"><div class="topbar-left"><div class="page-title">${e.name}</div><div class="page-sub">${e.device_id}</div></div>
+    <div class="topbar-right">
+      <button class="btn btn-red btn-sm" onclick="deleteEmp('${e.id}')"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Delete</button>
+      <button class="btn btn-sm" onclick="exportCSV('${e.id}')"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Export CSV</button>
+    </div></div>
+  <div class="content">
+    <div class="back-btn" onclick="S.empView='list';renderMain()"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>Employees</div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+      <div class="avatar" style="width:46px;height:46px;font-size:15px">${ini(e.name)}</div>
+      <div><div style="font-size:20px;font-weight:600;display:flex;align-items:center;gap:10px">${e.name} ${statusBadge(e.status)}</div>
+        <div style="font-size:13px;color:var(--text2)">${e.department||''} · ${e.device_id}</div></div>
+    </div>
+    <div class="info-strip">
+      <div class="info-box"><div class="info-box-label"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Last Seen</div><div class="info-box-val">${timeAgo(e.last_seen)}</div></div>
+      <div class="info-box"><div class="info-box-label"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>Current App</div><div class="info-box-val" style="font-size:12px">${e.current_app||'—'}</div></div>
+      <div class="info-box"><div class="info-box-label"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3"/></svg>API Key</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+          <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3)" id="apk-${e.id}">••••••••••••</div>
+          <button class="btn btn-sm" style="padding:3px 7px" onclick="toggleApiKey('${e.id}','${e.api_key}')"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <button class="btn btn-sm" style="padding:3px 7px" onclick="navigator.clipboard.writeText('${e.api_key}');toast('API key copied!')"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        </div>
+      </div>
+    </div>
+    <div class="tabs">
+      <div class="tab ${S.empTab==='activity'?'active':''}" onclick="S.empTab='activity';renderMain()">Activity Log</div>
+      <div class="tab ${S.empTab==='charts'?'active':''}" onclick="S.empTab='charts';renderMain()">Charts</div>
+      <div class="tab ${S.empTab==='screenshots'?'active':''}" onclick="S.empTab='screenshots';renderMain()">Screenshots</div>
+    </div>
+    <div class="table-card" style="padding:4px 18px">${tabContent}</div>
+  </div>`;
+}
+
+function openEmp(id){S.selectedEmp=id;S.empView='detail';S.empTab='activity';saveState(S);nav('employees');}
+
+// ── ANALYTICS ──────────────────────────────────
+async function renderAnalytics(){
+  const {emps,logs} = await fetchAnalytics();
+  const totalSec=logs.reduce((s,l)=>s+(l.duration_seconds||0),0);
+  const workSec=logs.filter(l=>l.status==='online').reduce((s,l)=>s+(l.duration_seconds||0),0);
+  const idleSec=logs.filter(l=>l.status==='idle').reduce((s,l)=>s+(l.duration_seconds||0),0);
+  const score=totalSec>0?Math.round(workSec/totalSec*100):0;
+
+  const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const dayTotals=new Array(7).fill(0);
+  logs.forEach(l=>{const d=new Date(l.logged_at).getDay();dayTotals[d]+=(l.duration_seconds||0)/3600;});
+  const maxD=Math.max(...dayTotals,0.1);
+  const barChart=days.map((d,i)=>{
+    const h=Math.round(dayTotals[i]/maxD*110);
+    return `<div class="bar-col"><div class="bar-val">${dayTotals[i].toFixed(1)}h</div>
+      <div class="bar-fill" style="height:${h}px;background:var(--green)"></div>
+      <div class="bar-lbl">${d}</div></div>`;
+  }).join('');
+
+  const appMap={};
+  logs.forEach(l=>{const k=(l.app_name||'').split(' - ')[0].slice(0,20);appMap[k]=(appMap[k]||0)+(l.duration_seconds||0);});
+  const appRows=Object.entries(appMap).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([app,sec])=>{
+    const pct=totalSec>0?Math.round(sec/totalSec*100):0;
+    return `<tr><td>${app}</td><td style="font-family:'DM Mono',monospace;font-size:12px">${fmtDur(sec)}</td><td style="font-family:'DM Mono',monospace;font-size:12px">${pct}%</td><td>${statusBadge('online')}</td></tr>`;
+  }).join('');
+
+  const empMap={};
+  logs.forEach(l=>{
+    if(!empMap[l.employee_id]) empMap[l.employee_id]={total:0,work:0};
+    empMap[l.employee_id].total+=(l.duration_seconds||0);
+    if(l.status==='online') empMap[l.employee_id].work+=(l.duration_seconds||0);
+  });
+  const rankRows=emps.map((e,i)=>{
+    const d=empMap[e.id]||{total:0,work:0};
+    const pct=d.total>0?Math.round(d.work/d.total*100):0;
+    const col=pct>=70?'var(--green)':pct>=50?'var(--amber)':'var(--red)';
+    return `<tr><td style="font-weight:600;color:var(--text3)">${i+1}</td>
+      <td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="width:26px;height:26px;font-size:10px">${ini(e.name)}</div>${e.name}</div></td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${fmtDur(d.total)}</td>
+      <td style="min-width:140px"><div class="rank-bar-wrap">
+        <div class="rank-bar-track"><div class="rank-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+        <span style="font-size:12px;font-weight:600;color:${col}">${pct}%</span></div></td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="topbar"><div class="topbar-left"><div class="page-title">Productivity Analytics</div><div class="page-sub">Analyze team performance and activity patterns</div></div>
+    <div class="topbar-right"><button class="btn btn-dark" onclick="exportAnalytics()"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export CSV</button></div></div>
+  <div class="content">${configBanner()}
+    <div class="filter-row">
+      <button class="pill" onclick="pillActive(this)">Today</button>
+      <button class="pill active" onclick="pillActive(this)">This Week</button>
+      <button class="pill" onclick="pillActive(this)">This Month</button>
+      <select style="padding:6px 12px;border-radius:20px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;outline:none">
+        <option>All Employees</option>${emps.map(e=>`<option>${e.name}</option>`).join('')}
+      </select>
+    </div>
+    <div class="metrics" style="margin-bottom:18px">
+      <div class="metric-card"><div><div class="metric-label">Total Hours</div><div class="metric-value">${fmtDur(totalSec)}</div></div></div>
+      <div class="metric-card"><div><div class="metric-label">Productive Time</div><div class="metric-value" style="color:var(--green)">${fmtDur(workSec)}</div></div></div>
+      <div class="metric-card"><div><div class="metric-label">Idle Time</div><div class="metric-value" style="color:var(--amber)">${fmtDur(idleSec)}</div></div></div>
+      <div class="metric-card"><div><div class="metric-label">Productivity Score</div><div class="metric-value" style="color:var(--blue)">${score}%</div></div></div>
+    </div>
+    <div class="analytics-grid">
+      <div class="chart-wrap"><div class="chart-title">Daily Activity Breakdown</div><div class="bar-chart">${barChart}</div>
+        <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text2)">
+          <span><span style="display:inline-block;width:8px;height:8px;background:var(--green);border-radius:2px;margin-right:4px"></span>Working</span>
+          <span><span style="display:inline-block;width:8px;height:8px;background:var(--amber);border-radius:2px;margin-right:4px"></span>Idle</span>
+        </div>
+      </div>
+      <div class="chart-wrap"><div class="chart-title">Working vs Idle Distribution</div>
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:130px">
+          <svg width="120" height="120" viewBox="0 0 42 42">
+            <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="var(--border)" stroke-width="5"/>
+            <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#15803d" stroke-width="5"
+              stroke-dasharray="${score} ${100-score}" stroke-dashoffset="25" transform="rotate(-90 21 21)"/>
+          </svg>
+          <div style="text-align:center;margin-top:8px"><div style="font-size:22px;font-weight:600">${score}%</div><div style="font-size:11px;color:var(--text2)">productive</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="table-card" style="margin-bottom:16px"><div class="table-hdr"><div class="table-title">Application Usage Time</div></div>
+      <table><thead><tr><th>Application</th><th>Total Time</th><th>% of Work Time</th><th>Status</th></tr></thead>
+      <tbody>${appRows||'<tr><td colspan="4"><div class="empty">No data yet</div></td></tr>'}</tbody></table>
+    </div>
+    <div class="table-card"><div class="table-hdr"><div class="table-title">Employee Productivity Ranking</div></div>
+      <table><thead><tr><th>#</th><th>Employee</th><th>Hours</th><th>Productivity</th></tr></thead>
+      <tbody>${rankRows||'<tr><td colspan="4"><div class="empty">No data yet</div></td></tr>'}</tbody></table>
+    </div></div>`;
+}
+
+// ── AGENT DOWNLOAD ──────────────────────────────
+function renderAgentDownload(){
+  const empSelect = `<select class="select-box" id="emp-select"><option value="">Choose an employee...</option></select>`;
+  return `
+  <div class="topbar"><div class="topbar-left"><div class="page-title">Agent Download</div><div class="page-sub">Download the employee monitoring agent for Windows computers</div></div></div>
+  <div class="content">
+    <div class="agent-grid">
+      <div class="agent-card">
+        <div class="agent-card-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>One-Click Installer</div>
+        <div class="agent-card-sub">Download a personalized installer with API key pre-configured</div>
+        <label style="font-size:12px;font-weight:500;color:var(--text2);display:block;margin-bottom:4px">Select Employee</label>
+        ${empSelect}
+        <button class="btn btn-dark" style="width:100%;justify-content:center" onclick="downloadPersonalized()"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download Personalized Installer</button>
+        <div style="font-size:11px;color:var(--text3);margin-top:10px">Just double-click setup.bat on the employee's PC — no manual configuration needed!</div>
+      </div>
+      <div class="agent-card">
+        <div class="agent-card-title"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Generic Agent Package</div>
+        <div class="agent-card-sub">Download without pre-configured API key</div>
+        <button class="btn" style="width:100%;justify-content:center;margin-top:24px" onclick="toast('Download the employee_agent.py from the package files below')"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download Generic Agent</button>
+        <div style="font-size:11px;color:var(--text3);margin-top:10px">API key must be manually added to employee_agent.py after download.</div>
+      </div>
+    </div>
+    <div class="table-card" style="margin-bottom:16px;padding:18px 20px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:4px">One-Click Installation Guide</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Deploying has never been easier</div>
+      <div class="step-item"><div class="step-num">1</div><div><div class="step-title">Select employee &amp; download</div><div class="step-sub">Choose the employee above and download their personalized installer</div></div></div>
+      <div class="step-item"><div class="step-num">2</div><div><div class="step-title">Extract &amp; run</div><div class="step-sub">Extract the ZIP on the employee's PC and double-click <code style="background:var(--bg);padding:2px 5px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace">setup.bat</code></div></div></div>
+      <div class="step-item"><div class="step-num">3</div><div><div class="step-title">Done!</div><div class="step-sub">The installer handles Python, dependencies, auto-start, and launches the agent automatically</div></div></div>
+    </div>
+    <div class="table-card" style="padding:18px 20px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:4px">Package Contents</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:14px">Files included in the agent package</div>
+      ${[['⚡','setup.bat','One-click installer — double-click to install'],['🐍','employee_agent.py','Main Python agent script'],['⚙️','config.json','Configuration file (API key, intervals)'],['▶','install.ps1','PowerShell installer script'],['📋','requirements.txt','Python dependencies'],['📖','README.md','Setup and usage instructions']].map(([ic,name,desc])=>`
+      <div class="pkg-item"><div class="pkg-icon">${ic}</div><div><div class="pkg-name">${name}</div><div class="pkg-desc">${desc}</div></div></div>`).join('')}
+    </div>
+  </div>`;
+}
+
+// ── SETTINGS ──────────────────────────────────
+function renderSettings(){
+  const url=localStorage.getItem('at_url')||'';
+  const key=localStorage.getItem('at_key')||'';
+  return `
+  <div class="topbar"><div class="topbar-left"><div class="page-title">Settings</div><div class="page-sub">Manage your account and preferences</div></div></div>
+  <div class="content">
+    <div class="settings-card" style="border:2px solid ${isConfigured()?'#bbf7d0':'#fcd34d'}">
+      <div class="settings-card-title">🔗 Supabase Configuration ${isConfigured()?'<span style="color:var(--green);font-size:12px">✓ Connected</span>':'<span style="color:var(--amber);font-size:12px">⚠ Not configured</span>'}</div>
+      <div class="settings-card-sub">Connect your Supabase database to enable real data</div>
+      <div class="field"><label>Supabase Project URL</label><input type="text" id="cfg-url" value="${url}" placeholder="https://xxxxxxxxxxxx.supabase.co"/></div>
+      <div class="field"><label>Supabase Anon Key</label><input type="text" id="cfg-key" value="${key}" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."/></div>
+      <button class="btn btn-dark" onclick="saveConfig()">Save & Connect</button>
+      <div style="font-size:12px;color:var(--text2);margin-top:10px">Get these from: <strong>supabase.com → Your Project → Settings → API</strong></div>
+    </div>
+    <div class="settings-card">
+      <div class="settings-card-title">Account</div>
+      <div class="settings-card-sub">Your account information</div>
+      <div class="field"><label>Email</label><input type="email" value="admin@company.com"/></div>
+    </div>
+    <div class="settings-card">
+      <div class="settings-card-title">Appearance</div>
+      <div class="settings-card-sub">Customize how the dashboard looks</div>
+      <div class="toggle-row">
+        <div style="font-size:13px;font-weight:500">Dark Mode</div>
+        <div class="toggle-track ${S.dark?'on':''}" onclick="toggleDark();this.classList.toggle('on')"><div class="toggle-thumb"></div></div>
+      </div>
+    </div>
+    <div class="settings-card">
+      <div class="settings-card-title">API Documentation</div>
+      <div class="settings-card-sub">How the Windows agent sends data</div>
+      <div style="margin-bottom:10px"><div style="font-size:13px;font-weight:600;margin-bottom:4px">Update Employee Status</div>
+      <div class="code-block">PATCH ${url||'https://your-project.supabase.co'}/rest/v1/employees?id=eq.{employee_id}
+Headers: apikey: {ANON_KEY}, Authorization: Bearer {ANON_KEY}
+Body: { "status": "online|idle|offline", "current_app": "...", "last_seen": "ISO_DATE" }</div></div>
+      <div style="margin-bottom:10px"><div style="font-size:13px;font-weight:600;margin-bottom:4px">Log Activity</div>
+      <div class="code-block">POST ${url||'https://your-project.supabase.co'}/rest/v1/activity_logs
+Headers: apikey: {ANON_KEY}, Content-Type: application/json
+Body: { "employee_id": "uuid", "app_name": "...", "status": "online|idle", "duration_seconds": 60 }</div></div>
+    </div>
+  </div>`;
+}
+
+// ── ACTION HANDLERS ──────────────────────────
+function attachHandlers(){
+  // populate employee select in agent download
+  const sel=document.getElementById('emp-select');
+  if(sel){
+    fetchEmployees().then(emps=>{
+      sel.innerHTML='<option value="">Choose an employee...</option>'+emps.map(e=>`<option value="${e.id}" data-key="${e.api_key}">${e.name} (${e.device_id})</option>`).join('');
+    });
+  }
+}
+
+function saveConfig(){
+  const url=document.getElementById('cfg-url')?.value?.trim();
+  const key=document.getElementById('cfg-key')?.value?.trim();
+  if(!url||!key){toast('Please fill in both fields');return;}
+  localStorage.setItem('at_url',url);
+  localStorage.setItem('at_key',key);
+  toast('Configuration saved! Reloading...',1500);
+  setTimeout(()=>location.reload(),1500);
+}
+
+function pillActive(el){document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));el.classList.add('active');}
+
+function toggleApiKey(id,key){
+  const el=document.getElementById('apk-'+id);
+  if(el) el.textContent=el.textContent.includes('•')?key:'••••••••••••';
+}
+
+async function deleteEmp(id){
+  if(!confirm('Delete this employee and all their data?')) return;
+  await deleteEmployee(id);
+  S.empView='list'; saveState(S);
+  renderMain(); toast('Employee deleted');
+}
+
+async function exportCSV(id){
+  const logs=await fetchActivity(id,1000);
+  const rows=[['App','Time','Status','Duration (s)'],...logs.map(l=>[l.app_name,l.logged_at,l.status,l.duration_seconds])];
+  const csv=rows.map(r=>r.map(c=>`"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download=`activity_${id}.csv`;a.click();toast('CSV exported');
+}
+
+function exportAnalytics(){toast('Exporting analytics...');}
+
+async function showAddEmp(){
+  document.getElementById('modal-inner').innerHTML=`
+    <div class="modal-title">Add Employee</div>
+    <div class="field"><label>Full Name *</label><input type="text" id="m-name" placeholder="e.g. Rahim Uddin"/></div>
+    <div class="field"><label>Device ID *</label><input type="text" id="m-device" placeholder="e.g. WS-10 (unique per PC)"/></div>
+    <div class="field"><label>Email</label><input type="email" id="m-email" placeholder="employee@company.com"/></div>
+    <div class="field"><label>Department</label><input type="text" id="m-dept" placeholder="e.g. Engineering"/></div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-dark" onclick="doAddEmp()">Add Employee</button>
+    </div>`;
+  document.getElementById('modal').style.display='flex';
+}
+
+async function doAddEmp(){
+  const name=document.getElementById('m-name')?.value?.trim();
+  const device=document.getElementById('m-device')?.value?.trim();
+  if(!name||!device){toast('Name and Device ID are required');return;}
+  const res=await addEmployee({name,device_id:device,email:document.getElementById('m-email')?.value||'',department:document.getElementById('m-dept')?.value||'General'});
+  if(res){closeModal();renderMain();toast('Employee added! Share their API key from the detail page.');}
+  else toast('Error adding employee. Check your Supabase config.');
+}
+
+async function downloadPersonalized(){
+  const sel=document.getElementById('emp-select');
+  if(!sel?.value){toast('Please select an employee first');return;}
+  const apiKey=sel.options[sel.selectedIndex]?.dataset?.key;
+  const name=sel.options[sel.selectedIndex]?.text||'Employee';
+  if(!apiKey){toast('Could not get API key');return;}
+  const agentCode=`# ActivityTrack Agent - Pre-configured for ${name}
+SUPABASE_URL = "${SUPABASE_URL||localStorage.getItem('at_url')||'YOUR_URL'}"
+SUPABASE_ANON_KEY = "${SUPABASE_ANON_KEY||localStorage.getItem('at_key')||'YOUR_KEY'}"
+EMPLOYEE_API_KEY = "${apiKey}"
+
+# Run: python employee_agent.py
+# Or double-click: setup.bat
+
+import subprocess, sys
+subprocess.run([sys.executable,'-m','pip','install','requests','pywin32','pillow','--quiet'])
+
+# === PASTE FULL AGENT CODE BELOW ===
+# Download employee_agent.py from your ActivityTrack dashboard
+`;
+  const blob=new Blob([agentCode],{type:'text/plain'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download=`activitytrack_${name.replace(/\s+/g,'_')}.py`;a.click();
+  toast(`Config file downloaded for ${name}`);
+}
+
+function closeModal(){document.getElementById('modal').style.display='none';}
+
+// ── INIT ──────────────────────────────────────
+document.body.classList.toggle('dark',S.dark);
+document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===S.page));
+renderMain();
+if(S.page==='dashboard') refreshTimer=setInterval(renderMain,15000);
+</script>
+</body>
+</html>
