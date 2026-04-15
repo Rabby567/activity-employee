@@ -779,6 +779,7 @@ async function downloadPersonalized(){
   // ── FILE CONTENTS ──────────────────────────────
 
   const configJson = JSON.stringify({
+    employee_name: empName,
     supabase_url: SB_URL,
     supabase_anon_key: SB_KEY,
     employee_api_key: apiKey,
@@ -787,316 +788,320 @@ async function downloadPersonalized(){
     idle_threshold_seconds: 120
   }, null, 2);
 
-  const agentPy = `"""
-ActivityTrack Windows Agent
-Pre-configured for: ${empName}
-Generated: ${new Date().toLocaleString()}
-"""
+  // Build agent Python file using string concatenation to avoid JS template literal conflicts with Python f-strings
+  const NL = '\n';
+  const agentPy = [
+    '"""',
+    'ActivityTrack Windows Agent',
+    'Pre-configured for: ' + empName,
+    'Generated: ' + new Date().toLocaleString(),
+    '"""',
+    '',
+    'import time, json, os, sys, ctypes, platform, threading, datetime, io, requests',
+    '',
+    '# Load config from config.json',
+    'def load_config():',
+    '    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")',
+    '    try:',
+    '        with open(config_path, "r") as f:',
+    '            return json.load(f)',
+    '    except Exception as e:',
+    '        print("[ERROR] Cannot read config.json: " + str(e))',
+    '        input("Press Enter to exit...")',
+    '        sys.exit(1)',
+    '',
+    'cfg = load_config()',
+    'SUPABASE_URL      = cfg["supabase_url"]',
+    'SUPABASE_ANON_KEY = cfg["supabase_anon_key"]',
+    'EMPLOYEE_API_KEY  = cfg["employee_api_key"]',
+    'EMPLOYEE_NAME     = cfg.get("employee_name", "' + empName + '")',
+    'ACTIVITY_INTERVAL   = cfg.get("activity_interval_seconds", 10)',
+    'SCREENSHOT_INTERVAL = cfg.get("screenshot_interval_seconds", 300)',
+    'IDLE_THRESHOLD      = cfg.get("idle_threshold_seconds", 120)',
+    '',
+    'HEADERS = {',
+    '    "Content-Type": "application/json",',
+    '    "apikey": SUPABASE_ANON_KEY,',
+    '    "Authorization": "Bearer " + SUPABASE_ANON_KEY,',
+    '}',
+    '',
+    'def is_windows():',
+    '    return platform.system() == "Windows"',
+    '',
+    'def get_active_window_title():',
+    '    try:',
+    '        if is_windows():',
+    '            import win32gui',
+    '            hwnd = win32gui.GetForegroundWindow()',
+    '            return win32gui.GetWindowText(hwnd) or "Unknown"',
+    '        return "Unknown (Windows only)"',
+    '    except Exception:',
+    '        return "Unknown"',
+    '',
+    'def get_idle_seconds():',
+    '    try:',
+    '        if is_windows():',
+    '            class LASTINPUTINFO(ctypes.Structure):',
+    '                _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]',
+    '            lii = LASTINPUTINFO()',
+    '            lii.cbSize = ctypes.sizeof(LASTINPUTINFO)',
+    '            ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))',
+    '            return (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) / 1000.0',
+    '        return 0',
+    '    except Exception:',
+    '        return 0',
+    '',
+    'def get_employee_id():',
+    '    try:',
+    '        url = SUPABASE_URL + "/rest/v1/employees"',
+    '        params = {"api_key": "eq." + EMPLOYEE_API_KEY, "select": "id,name,device_id"}',
+    '        r = requests.get(url, headers=HEADERS, params=params, timeout=10)',
+    '        if r.status_code == 200:',
+    '            data = r.json()',
+    '            if data:',
+    '                print("[Agent] Connected as: " + data[0]["name"] + " (" + data[0]["device_id"] + ")")',
+    '                return data[0]["id"]',
+    '        print("[Agent] ERROR: Employee not found. Check API key in config.json")',
+    '        return None',
+    '    except Exception as e:',
+    '        print("[Agent] Connection error: " + str(e))',
+    '        return None',
+    '',
+    'def update_status(employee_id, status, current_app):',
+    '    try:',
+    '        url = SUPABASE_URL + "/rest/v1/employees"',
+    '        payload = {',
+    '            "status": status,',
+    '            "current_app": current_app[:200],',
+    '            "last_seen": datetime.datetime.utcnow().isoformat() + "Z"',
+    '        }',
+    '        requests.patch(url, headers=HEADERS, params={"id": "eq." + employee_id}, json=payload, timeout=10)',
+    '    except Exception as e:',
+    '        print("[Agent] Status update error: " + str(e))',
+    '',
+    'def log_activity(employee_id, app_name, status, duration_seconds):',
+    '    try:',
+    '        url = SUPABASE_URL + "/rest/v1/activity_logs"',
+    '        payload = {',
+    '            "employee_id": employee_id,',
+    '            "app_name": app_name[:200],',
+    '            "window_title": app_name[:200],',
+    '            "status": status,',
+    '            "duration_seconds": int(duration_seconds),',
+    '            "logged_at": datetime.datetime.utcnow().isoformat() + "Z"',
+    '        }',
+    '        requests.post(url, headers={**HEADERS, "Prefer": "return=minimal"}, json=payload, timeout=10)',
+    '    except Exception as e:',
+    '        print("[Agent] Log error: " + str(e))',
+    '',
+    'def take_and_upload_screenshot(employee_id):',
+    '    try:',
+    '        from PIL import ImageGrab',
+    '        img = ImageGrab.grab()',
+    '        img.thumbnail((1280, 720))',
+    '        buf = io.BytesIO()',
+    '        img.save(buf, format="JPEG", quality=60)',
+    '        buf.seek(0)',
+    '        image_bytes = buf.read()',
+    '        ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")',
+    '        path = employee_id + "/" + ts + ".jpg"',
+    '        url = SUPABASE_URL + "/storage/v1/object/screenshots/" + path',
+    '        hdrs = {"apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "image/jpeg"}',
+    '        r = requests.post(url, headers=hdrs, data=image_bytes, timeout=30)',
+    '        if r.status_code in [200, 201]:',
+    '            file_url = SUPABASE_URL + "/storage/v1/object/public/screenshots/" + path',
+    '            requests.post(SUPABASE_URL + "/rest/v1/screenshots",',
+    '                headers={**HEADERS, "Prefer": "return=minimal"},',
+    '                json={"employee_id": employee_id, "file_path": path, "file_url": file_url},',
+    '                timeout=10)',
+    '            print("[Agent] Screenshot uploaded: " + ts)',
+    '    except ImportError:',
+    '        pass',
+    '    except Exception as e:',
+    '        print("[Agent] Screenshot error: " + str(e))',
+    '',
+    'def screenshot_loop(employee_id):',
+    '    while True:',
+    '        time.sleep(SCREENSHOT_INTERVAL)',
+    '        take_and_upload_screenshot(employee_id)',
+    '',
+    'def main():',
+    '    print("=" * 55)',
+    '    print("  ActivityTrack Agent")',
+    '    print("  Employee : " + EMPLOYEE_NAME)',
+    '    print("  Server   : " + SUPABASE_URL[:45] + "...")',
+    '    print("=" * 55)',
+    '',
+    '    if "YOUR_SUPABASE" in SUPABASE_URL:',
+    '        print("")',
+    '        print("[ERROR] config.json is not configured!")',
+    '        input("Press Enter to exit...")',
+    '        sys.exit(1)',
+    '',
+    '    print("")',
+    '    print("[Agent] Connecting to server...")',
+    '    employee_id = None',
+    '    for attempt in range(5):',
+    '        employee_id = get_employee_id()',
+    '        if employee_id: break',
+    '        print("[Agent] Retrying in 10s... (" + str(attempt+1) + "/5)")',
+    '        time.sleep(10)',
+    '',
+    '    if not employee_id:',
+    '        print("[Agent] FATAL: Cannot connect. Check config.json and internet.")',
+    '        input("Press Enter to exit...")',
+    '        sys.exit(1)',
+    '',
+    '    threading.Thread(target=screenshot_loop, args=(employee_id,), daemon=True).start()',
+    '',
+    '    last_app = ""',
+    '    last_log_time = time.time()',
+    '    print("")',
+    '    print("[Agent] Running. Press Ctrl+C to stop.")',
+    '    print("")',
+    '',
+    '    try:',
+    '        while True:',
+    '            current_app = get_active_window_title()',
+    '            idle_secs   = get_idle_seconds()',
+    '            status      = "idle" if idle_secs > IDLE_THRESHOLD else "online"',
+    '            now         = time.time()',
+    '            elapsed     = now - last_log_time',
+    '',
+    '            update_status(employee_id, status, current_app)',
+    '',
+    '            if current_app != last_app or elapsed >= ACTIVITY_INTERVAL:',
+    '                if last_app:',
+    '                    log_activity(employee_id, last_app, status, elapsed)',
+    '                    ts_now = datetime.datetime.now().strftime("%H:%M:%S")',
+    '                    print("[" + ts_now + "] " + status.upper() + ": " + last_app[:70])',
+    '                last_app = current_app',
+    '                last_log_time = now',
+    '',
+    '            time.sleep(ACTIVITY_INTERVAL)',
+    '',
+    '    except KeyboardInterrupt:',
+    '        print("")',
+    '        print("[Agent] Stopped. Setting offline...")',
+    '        update_status(employee_id, "offline", "")',
+    '        print("[Agent] Goodbye!")',
+    '',
+    'if __name__ == "__main__":',
+    '    main()',
+  ].join(NL);
 
-import time, json, os, sys, ctypes, platform, threading, datetime, io, requests
+  const setupBat = [
+    '@echo off',
+    'title ActivityTrack Agent - ' + empName,
+    'color 0A',
+    'echo.',
+    'echo  ===================================================',
+    'echo    ActivityTrack Agent',
+    'echo    Employee: ' + empName,
+    'echo  ===================================================',
+    'echo.',
+    ':: Check Python',
+    'python --version >nul 2>&1',
+    'if %errorlevel% neq 0 (',
+    '    echo  [ERROR] Python is not installed!',
+    '    echo.',
+    '    echo  Please download and install Python from:',
+    '    echo  https://python.org/downloads',
+    '    echo.',
+    '    echo  IMPORTANT: Check "Add Python to PATH" during install!',
+    '    echo.',
+    '    start https://python.org/downloads',
+    '    pause',
+    '    exit /b 1',
+    ')',
+    'echo  [1/3] Python found. Installing dependencies...',
+    'pip install requests pywin32 pillow psutil --quiet --upgrade',
+    'echo  [2/3] Dependencies installed OK.',
+    'echo.',
+    'echo  [3/3] Starting ActivityTrack Agent...',
+    'echo.',
+    'echo  ===================================================',
+    'echo    Agent is running. Do NOT close this window.',
+    'echo    Employee: ' + empName,
+    'echo  ===================================================',
+    'echo.',
+    'python employee_agent.py',
+    'pause',
+  ].join('\r\n');
 
-# ── CONFIG (loaded from config.json) ──────────────────────────────
-def load_config():
-    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
-    try:
-        with open(config_path, 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"[ERROR] Cannot read config.json: {e}")
-        sys.exit(1)
+  const installPs1 = [
+    '# ActivityTrack Agent Installer - PowerShell',
+    '# Employee: ' + empName,
+    '# Run as Administrator for auto-start setup',
+    '',
+    'Write-Host "ActivityTrack Agent Setup" -ForegroundColor Green',
+    'Write-Host "Employee: ' + empName + '" -ForegroundColor Cyan',
+    'Write-Host ""',
+    '',
+    '# Check Python',
+    'try {',
+    '    $pyVersion = python --version 2>&1',
+    '    Write-Host "[OK] Python found: $pyVersion" -ForegroundColor Green',
+    '} catch {',
+    '    Write-Host "[ERROR] Python not found. Installing via winget..." -ForegroundColor Red',
+    '    winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements',
+    '}',
+    '',
+    '# Install dependencies',
+    'Write-Host "Installing Python packages..." -ForegroundColor Yellow',
+    'pip install requests pywin32 pillow psutil --quiet --upgrade',
+    '',
+    '# Create auto-start shortcut',
+    '$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path',
+    '$startupFolder = [Environment]::GetFolderPath("Startup")',
+    '$shortcutPath = Join-Path $startupFolder "ActivityTrack_' + safeName + '.lnk"',
+    '$wsh = New-Object -ComObject WScript.Shell',
+    '$shortcut = $wsh.CreateShortcut($shortcutPath)',
+    '$shortcut.TargetPath = Join-Path $scriptDir "setup.bat"',
+    '$shortcut.WorkingDirectory = $scriptDir',
+    '$shortcut.WindowStyle = 1',
+    '$shortcut.Description = "ActivityTrack Agent - ' + empName + '"',
+    '$shortcut.Save()',
+    '',
+    'Write-Host "[OK] Auto-start shortcut created!" -ForegroundColor Green',
+    'Write-Host "Starting agent now..." -ForegroundColor Yellow',
+    'Start-Process -FilePath (Join-Path $scriptDir "setup.bat")',
+    'Write-Host "Done! Agent will auto-start on every Windows login." -ForegroundColor Green',
+  ].join('\n');
 
-cfg = load_config()
-SUPABASE_URL      = cfg['supabase_url']
-SUPABASE_ANON_KEY = cfg['supabase_anon_key']
-EMPLOYEE_API_KEY  = cfg['employee_api_key']
-ACTIVITY_INTERVAL   = cfg.get('activity_interval_seconds', 10)
-SCREENSHOT_INTERVAL = cfg.get('screenshot_interval_seconds', 300)
-IDLE_THRESHOLD      = cfg.get('idle_threshold_seconds', 120)
+  const requirementsTxt = 'requests>=2.31.0\npywin32>=306\nPillow>=10.0.0\npsutil>=5.9.0\n';
 
-HEADERS = {
-    "Content-Type": "application/json",
-    "apikey": SUPABASE_ANON_KEY,
-    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-}
-
-def is_windows():
-    return platform.system() == "Windows"
-
-def get_active_window_title():
-    try:
-        if is_windows():
-            import win32gui
-            hwnd = win32gui.GetForegroundWindow()
-            return win32gui.GetWindowText(hwnd) or "Unknown"
-        return "Unknown (Windows only)"
-    except Exception:
-        return "Unknown"
-
-def get_idle_seconds():
-    try:
-        if is_windows():
-            class LASTINPUTINFO(ctypes.Structure):
-                _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
-            lii = LASTINPUTINFO()
-            lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
-            ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))
-            return (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) / 1000.0
-        return 0
-    except Exception:
-        return 0
-
-def get_employee_id():
-    try:
-        url = f"{SUPABASE_URL}/rest/v1/employees"
-        params = {"api_key": f"eq.{EMPLOYEE_API_KEY}", "select": "id,name,device_id"}
-        r = requests.get(url, headers=HEADERS, params=params, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            if data:
-                print(f"[Agent] Connected as: {data[0]['name']} ({data[0]['device_id']})")
-                return data[0]['id']
-        print(f"[Agent] ERROR: Employee not found. Check API key in config.json")
-        return None
-    except Exception as e:
-        print(f"[Agent] Connection error: {e}")
-        return None
-
-def update_status(employee_id, status, current_app):
-    try:
-        url = f"{SUPABASE_URL}/rest/v1/employees"
-        payload = {
-            "status": status,
-            "current_app": current_app[:200],
-            "last_seen": datetime.datetime.utcnow().isoformat() + "Z"
-        }
-        requests.patch(url, headers=HEADERS, params={"id": f"eq.{employee_id}"}, json=payload, timeout=10)
-    except Exception as e:
-        print(f"[Agent] Status update error: {e}")
-
-def log_activity(employee_id, app_name, status, duration_seconds):
-    try:
-        url = f"{SUPABASE_URL}/rest/v1/activity_logs"
-        payload = {
-            "employee_id": employee_id,
-            "app_name": app_name[:200],
-            "window_title": app_name[:200],
-            "status": status,
-            "duration_seconds": int(duration_seconds),
-            "logged_at": datetime.datetime.utcnow().isoformat() + "Z"
-        }
-        requests.post(url, headers={**HEADERS, "Prefer": "return=minimal"}, json=payload, timeout=10)
-    except Exception as e:
-        print(f"[Agent] Log error: {e}")
-
-def take_and_upload_screenshot(employee_id):
-    try:
-        from PIL import ImageGrab
-        img = ImageGrab.grab()
-        img.thumbnail((1280, 720))
-        buf = io.BytesIO()
-        img.save(buf, format='JPEG', quality=60)
-        buf.seek(0)
-        image_bytes = buf.read()
-
-        ts = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-        path = f"{employee_id}/{ts}.jpg"
-        url = f"{SUPABASE_URL}/storage/v1/object/screenshots/{path}"
-        headers = {"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {SUPABASE_ANON_KEY}", "Content-Type": "image/jpeg"}
-        r = requests.post(url, headers=headers, data=image_bytes, timeout=30)
-        if r.status_code in [200, 201]:
-            file_url = f"{SUPABASE_URL}/storage/v1/object/public/screenshots/{path}"
-            requests.post(f"{SUPABASE_URL}/rest/v1/screenshots",
-                headers={**HEADERS, "Prefer": "return=minimal"},
-                json={"employee_id": employee_id, "file_path": path, "file_url": file_url},
-                timeout=10)
-            print(f"[Agent] Screenshot uploaded: {ts}")
-    except ImportError:
-        pass
-    except Exception as e:
-        print(f"[Agent] Screenshot error: {e}")
-
-def screenshot_loop(employee_id):
-    while True:
-        time.sleep(SCREENSHOT_INTERVAL)
-        take_and_upload_screenshot(employee_id)
-
-def main():
-    print("=" * 55)
-    print(f"  ActivityTrack Agent — {empName}")
-    print(f"  Server: {SUPABASE_URL[:40]}...")
-    print("=" * 55)
-
-    if "YOUR_SUPABASE" in SUPABASE_URL:
-        print("\\n[ERROR] config.json is not configured! Edit it first.")
-        input("Press Enter to exit...")
-        sys.exit(1)
-
-    employee_id = None
-    for attempt in range(5):
-        employee_id = get_employee_id()
-        if employee_id: break
-        print(f"[Agent] Retrying in 10s... ({attempt+1}/5)")
-        time.sleep(10)
-
-    if not employee_id:
-        print("[Agent] FATAL: Cannot connect. Check config.json and internet.")
-        input("Press Enter to exit...")
-        sys.exit(1)
-
-    threading.Thread(target=screenshot_loop, args=(employee_id,), daemon=True).start()
-
-    last_app = ""
-    last_log_time = time.time()
-    print("\\n[Agent] Running. Press Ctrl+C to stop.\\n")
-
-    try:
-        while True:
-            current_app = get_active_window_title()
-            idle_secs   = get_idle_seconds()
-            status      = "idle" if idle_secs > IDLE_THRESHOLD else "online"
-            now         = time.time()
-            elapsed     = now - last_log_time
-
-            update_status(employee_id, status, current_app)
-
-            if current_app != last_app or elapsed >= ACTIVITY_INTERVAL:
-                if last_app:
-                    log_activity(employee_id, last_app, status, elapsed)
-                    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {status.upper()}: {last_app[:70]}")
-                last_app = current_app
-                last_log_time = now
-
-            time.sleep(ACTIVITY_INTERVAL)
-
-    except KeyboardInterrupt:
-        print("\\n[Agent] Stopped. Setting offline...")
-        update_status(employee_id, "offline", "")
-        print("[Agent] Goodbye!")
-
-if __name__ == "__main__":
-    main()
-`;
-
-  const setupBat = `@echo off
-title ActivityTrack Agent - ${empName}
-color 0A
-echo.
-echo  =====================================================
-echo    ActivityTrack Agent
-echo    Employee: ${empName}
-echo  =====================================================
-echo.
-
-:: Check Python
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo  [ERROR] Python is not installed!
-    echo.
-    echo  Please install Python from:
-    echo  https://python.org/downloads
-    echo.
-    echo  IMPORTANT: Check "Add Python to PATH" during install!
-    echo.
-    start https://python.org/downloads
-    pause
-    exit /b 1
-)
-
-echo  [1/3] Python found. Installing dependencies...
-pip install requests pywin32 pillow psutil --quiet --upgrade
-echo  [2/3] Dependencies installed OK.
-echo.
-echo  [3/3] Starting ActivityTrack Agent...
-echo.
-echo  =====================================================
-echo    Agent is running. Do NOT close this window.
-echo    Employee: ${empName}
-echo  =====================================================
-echo.
-
-python employee_agent.py
-pause
-`;
-
-  const installPs1 = `# ActivityTrack Agent Installer - PowerShell
-# Employee: ${empName}
-# Run as Administrator for best results
-
-Write-Host "ActivityTrack Agent Setup" -ForegroundColor Green
-Write-Host "Employee: ${empName}" -ForegroundColor Cyan
-Write-Host ""
-
-# Check Python
-try {
-    $pyVersion = python --version 2>&1
-    Write-Host "[OK] Python found: $pyVersion" -ForegroundColor Green
-} catch {
-    Write-Host "[ERROR] Python not found. Installing via winget..." -ForegroundColor Red
-    winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements
-}
-
-# Install dependencies
-Write-Host "Installing Python packages..." -ForegroundColor Yellow
-pip install requests pywin32 pillow psutil --quiet --upgrade
-
-# Create auto-start shortcut
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$startupFolder = [Environment]::GetFolderPath("Startup")
-$shortcutPath = Join-Path $startupFolder "ActivityTrack_${safeName}.lnk"
-
-$wsh = New-Object -ComObject WScript.Shell
-$shortcut = $wsh.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = Join-Path $scriptDir "setup.bat"
-$shortcut.WorkingDirectory = $scriptDir
-$shortcut.WindowStyle = 1
-$shortcut.Description = "ActivityTrack Agent - ${empName}"
-$shortcut.Save()
-
-Write-Host "[OK] Auto-start shortcut created!" -ForegroundColor Green
-Write-Host ""
-Write-Host "Starting agent now..." -ForegroundColor Yellow
-Start-Process -FilePath (Join-Path $scriptDir "setup.bat")
-Write-Host "Agent started! It will auto-start on every Windows login." -ForegroundColor Green
-`;
-
-  const requirementsTxt = `requests>=2.31.0
-pywin32>=306
-Pillow>=10.0.0
-psutil>=5.9.0
-`;
-
-  const readmeMd = `# ActivityTrack Agent
-## Employee: ${empName}
-## Generated: ${new Date().toLocaleString()}
-
-### Quick Start
-1. Double-click **setup.bat** to install and run
-2. Do NOT close the black window that opens
-3. The agent is now tracking and sending data
-
-### Files
-- setup.bat — Double-click this to start
-- employee_agent.py — The main agent script
-- config.json — Your pre-configured settings (API keys)
-- install.ps1 — PowerShell installer (run as Admin for auto-start)
-- requirements.txt — Python packages
-
-### Auto-start on Windows boot
-Run install.ps1 as Administrator — it adds the agent to Windows startup.
-
-### Requirements
-- Windows 10 or 11
-- Python 3.8+ (download from python.org — check "Add to PATH")
-- Internet connection
-
-### Troubleshooting
-- "Python not found" → Install from python.org, check "Add Python to PATH"
-- "Cannot connect" → Check internet connection
-- "Employee not found" → Contact your admin to verify your API key
-
-### Support
-Contact your ActivityTrack administrator for help.
-`;
+  const readmeMd = [
+    '# ActivityTrack Agent',
+    '## Employee: ' + empName,
+    '## Generated: ' + new Date().toLocaleString(),
+    '',
+    '### Quick Start',
+    '1. Double-click **setup.bat** to install and run',
+    '2. Do NOT close the black window that opens',
+    '3. The agent is now tracking and sending data to the dashboard',
+    '',
+    '### Files',
+    '- setup.bat — Double-click this to start the agent',
+    '- employee_agent.py — The main Python agent script',
+    '- config.json — Pre-configured with your API keys (do not share)',
+    '- install.ps1 — Run as Administrator to add auto-start on Windows boot',
+    '- requirements.txt — Python packages list',
+    '',
+    '### Auto-start on Windows boot',
+    'Right-click install.ps1 → Run as Administrator',
+    'This adds the agent to Windows Startup automatically.',
+    '',
+    '### Requirements',
+    '- Windows 10 or 11',
+    '- Python 3.8+ (download from https://python.org — check Add to PATH)',
+    '- Internet connection',
+    '',
+    '### Troubleshooting',
+    '- Python not found → Install from python.org, check Add Python to PATH',
+    '- Cannot connect → Check internet connection and config.json',
+    '- Employee not found → Contact your admin to verify your API key',
+  ].join('\n');
 
   // ── BUILD ZIP WITH JSZip ──────────────────────────────
   try {
@@ -1111,7 +1116,7 @@ Contact your ActivityTrack administrator for help.
     }
 
     const zip = new JSZip();
-    const folder = zip.folder(`ActivityTrack_${safeName}`);
+    const folder = zip.folder('ActivityTrack_' + safeName);
     folder.file('config.json',       configJson);
     folder.file('employee_agent.py', agentPy);
     folder.file('setup.bat',         setupBat);
@@ -1122,10 +1127,10 @@ Contact your ActivityTrack administrator for help.
     const blob = await zip.generateAsync({type:'blob', compression:'DEFLATE', compressionOptions:{level:6}});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `ActivityTrack_${safeName}.zip`;
+    a.download = 'ActivityTrack_' + safeName + '.zip';
     a.click();
     URL.revokeObjectURL(a.href);
-    toast(`✓ ZIP downloaded for ${empName} — Extract & double-click setup.bat`);
+    toast('ZIP downloaded for ' + empName + ' — Extract and double-click setup.bat');
   } catch(err) {
     console.error(err);
     toast('ZIP error: '+err.message);
