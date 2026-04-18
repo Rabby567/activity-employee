@@ -228,21 +228,25 @@ tr:last-child td{border-bottom:none}
 
 <script>
 // ══════════════════════════════════════════════════
-//  CONFIGURATION — Replace with your Supabase values
+//  CONFIGURATION
 // ══════════════════════════════════════════════════
 const SUPABASE_URL      = localStorage.getItem('at_url')  || '';
 const SUPABASE_ANON_KEY = localStorage.getItem('at_key')  || '';
 // ══════════════════════════════════════════════════
 
 const STORE = 'at_state_v2';
-
 function loadState(){try{return JSON.parse(localStorage.getItem(STORE)||'null');}catch(e){return null;}}
 function saveState(s){localStorage.setItem(STORE,JSON.stringify(s));}
 
 let S = loadState() || {dark:false, page:'dashboard', empView:'list', selectedEmp:null, empTab:'activity'};
-let refreshTimer = null;
+const isConfigured = ()=> SUPABASE_URL && SUPABASE_ANON_KEY && !SUPABASE_URL.includes('YOUR_PROJECT');
 
-// ── SUPABASE API ──────────────────────────────────
+// ── IN-MEMORY CACHE (updated by real-time) ────────
+let CACHE = { employees: null, lastActivity: null };
+let realtimeChannel = null;
+let debounceTimer = null;
+
+// ── SUPABASE REST API ─────────────────────────────
 async function sb(method, path, body=null, params={}){
   if(!SUPABASE_URL||!SUPABASE_ANON_KEY) return null;
   const url = new URL(SUPABASE_URL+'/rest/v1/'+path);
@@ -259,26 +263,183 @@ async function sb(method, path, body=null, params={}){
   if(body) opts.body = JSON.stringify(body);
   try{
     const r = await fetch(url.toString(), opts);
-    if(!r.ok){
-      const err = await r.text();
-      console.error('Supabase error:', r.status, err);
-      return null;
-    }
+    if(!r.ok){ console.error('Supabase error:', r.status, await r.text()); return null; }
     const ct = r.headers.get('content-type')||'';
     return ct.includes('json') ? await r.json() : null;
-  }catch(e){
-    console.error('Fetch error:', e);
-    return null;
+  }catch(e){ console.error('Fetch error:', e); return null; }
+}
+
+// ── REAL-TIME WEBSOCKET SUBSCRIPTION ─────────────
+function startRealtime(){
+  if(!isConfigured()) return;
+  stopRealtime();
+
+  // Build WebSocket URL for Supabase Realtime
+  const wsBase = SUPABASE_URL.replace('https://','wss://').replace('http://','ws://');
+  const wsUrl  = wsBase + '/realtime/v1/websocket?apikey=' + SUPABASE_ANON_KEY + '&vsn=1.0.0';
+
+  let ws;
+  let heartbeatInterval;
+  let reconnectTimer;
+  let ref = 1;
+  const getRef = () => String(ref++);
+
+  function connect(){
+    try{ ws = new WebSocket(wsUrl); } catch(e){ scheduleReconnect(); return; }
+
+    ws.onopen = () => {
+      console.log('[RT] Connected');
+      updateRTIndicator(true);
+
+      // Subscribe to employees table changes
+      ws.send(JSON.stringify({
+        topic: 'realtime:public:employees',
+        event: 'phx_join',
+        payload: { config:{ broadcast:{self:false}, presence:{key:''}, postgres_changes:[
+          {event:'*', schema:'public', table:'employees'}
+        ]}},
+        ref: getRef()
+      }));
+
+      // Subscribe to activity_logs table changes
+      ws.send(JSON.stringify({
+        topic: 'realtime:public:activity_logs',
+        event: 'phx_join',
+        payload: { config:{ broadcast:{self:false}, presence:{key:''}, postgres_changes:[
+          {event:'INSERT', schema:'public', table:'activity_logs'}
+        ]}},
+        ref: getRef()
+      }));
+
+      // Subscribe to screenshots table changes
+      ws.send(JSON.stringify({
+        topic: 'realtime:public:screenshots',
+        event: 'phx_join',
+        payload: { config:{ broadcast:{self:false}, presence:{key:''}, postgres_changes:[
+          {event:'INSERT', schema:'public', table:'screenshots'}
+        ]}},
+        ref: getRef()
+      }));
+
+      // Heartbeat every 25s to keep connection alive
+      heartbeatInterval = setInterval(()=>{
+        if(ws.readyState === WebSocket.OPEN){
+          ws.send(JSON.stringify({topic:'phoenix',event:'heartbeat',payload:{},ref:getRef()}));
+        }
+      }, 25000);
+    };
+
+    ws.onmessage = (event) => {
+      try{
+        const msg = JSON.parse(event.data);
+        const pgEvent = msg?.payload?.data;
+
+        // Handle postgres_changes events
+        if(msg.event === 'postgres_changes' && pgEvent){
+          const table  = pgEvent.table;
+          const type   = pgEvent.type;   // INSERT | UPDATE | DELETE
+          const record = pgEvent.record;
+          const old    = pgEvent.old_record;
+
+          console.log('[RT] Change:', table, type, record);
+
+          if(table === 'employees'){
+            // Instantly update cache
+            if(type === 'UPDATE' && record){
+              if(CACHE.employees){
+                const idx = CACHE.employees.findIndex(e=>e.id===record.id);
+                if(idx>=0) CACHE.employees[idx] = {...CACHE.employees[idx], ...record};
+                else CACHE.employees.push(record);
+              }
+              // Show flash notification
+              showRTFlash(record.name + ' — ' + (record.status||'updated'), record.status);
+            } else if(type === 'INSERT' && record){
+              if(CACHE.employees) CACHE.employees.push(record);
+            } else if(type === 'DELETE' && old){
+              if(CACHE.employees) CACHE.employees = CACHE.employees.filter(e=>e.id!==old.id);
+            }
+          }
+
+          if(table === 'activity_logs' && type === 'INSERT'){
+            CACHE.lastActivity = record;
+          }
+
+          // Debounce re-render to avoid too many rapid redraws
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(()=> renderMain(), 300);
+        }
+      } catch(e){ /* ignore parse errors */ }
+    };
+
+    ws.onclose = (e) => {
+      console.log('[RT] Disconnected:', e.code);
+      clearInterval(heartbeatInterval);
+      updateRTIndicator(false);
+      scheduleReconnect();
+    };
+
+    ws.onerror = () => {
+      updateRTIndicator(false);
+    };
+  }
+
+  function scheduleReconnect(){
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(()=> connect(), 5000);
+  }
+
+  realtimeChannel = {
+    close: ()=>{
+      clearInterval(heartbeatInterval);
+      clearTimeout(reconnectTimer);
+      if(ws) try{ ws.close(); }catch(e){}
+    }
+  };
+
+  connect();
+}
+
+function stopRealtime(){
+  if(realtimeChannel){ try{ realtimeChannel.close(); }catch(e){} realtimeChannel=null; }
+}
+
+function updateRTIndicator(connected){
+  const pill = document.querySelector('.live-pill');
+  if(!pill) return;
+  if(connected){
+    pill.style.background='#f0fdf4'; pill.style.color='#15803d'; pill.style.borderColor='#bbf7d0';
+    const dot = pill.querySelector('.pulse');
+    if(dot){ dot.style.background='#15803d'; dot.style.animationPlayState='running'; }
+    const txt = pill.querySelector('.rt-txt');
+    if(txt) txt.textContent='Live';
+  } else {
+    pill.style.background='#fff7ed'; pill.style.color='#b45309'; pill.style.borderColor='#fcd34d';
+    const dot = pill.querySelector('.pulse');
+    if(dot){ dot.style.background='#b45309'; dot.style.animationPlayState='paused'; }
+    const txt = pill.querySelector('.rt-txt');
+    if(txt) txt.textContent='Reconnecting...';
   }
 }
 
-const isConfigured = ()=> SUPABASE_URL&&SUPABASE_ANON_KEY&&!SUPABASE_URL.includes('YOUR_PROJECT');
+function showRTFlash(msg, status){
+  const colors = {online:'#15803d', idle:'#b45309', offline:'#6b7280'};
+  const col = colors[status] || '#1d4ed8';
+  document.querySelectorAll('.rt-flash').forEach(e=>e.remove());
+  const f = document.createElement('div');
+  f.className = 'rt-flash';
+  f.style.cssText = 'position:fixed;top:70px;right:20px;background:'+col+';color:#fff;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:500;z-index:400;animation:slideup .2s ease;max-width:300px;display:flex;align-items:center;gap:8px';
+  f.innerHTML = '<span style="width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,0.6);display:inline-block;flex-shrink:0"></span>' + msg;
+  document.body.appendChild(f);
+  setTimeout(()=>f.remove(), 3000);
+}
 
 // ── DATA FETCHING ─────────────────────────────────
-async function fetchEmployees(){
+async function fetchEmployees(forceRefresh=false){
   if(!isConfigured()) return demoEmployees();
+  if(CACHE.employees && !forceRefresh) return CACHE.employees;
   const data = await sb('GET','employees',null,{select:'*',order:'created_at.asc'});
-  return data || demoEmployees();
+  CACHE.employees = data || demoEmployees();
+  return CACHE.employees;
 }
 
 async function fetchActivity(empId, limit=30){
@@ -375,9 +536,7 @@ function configBanner(){
 function nav(page){
   S.page=page; S.empView='list'; saveState(S);
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
-  clearInterval(refreshTimer);
   renderMain();
-  if(page==='dashboard') refreshTimer=setInterval(renderMain,15000);
 }
 function toggleDark(){S.dark=!S.dark;document.body.classList.toggle('dark',S.dark);saveState(S);}
 function signOut(){if(confirm('Sign out?')){localStorage.removeItem('at_url');localStorage.removeItem('at_key');location.reload();}}
@@ -411,8 +570,8 @@ async function renderDashboard(){
   </tr>`).join('');
   return `
   <div class="topbar"><div class="topbar-left"><div class="page-title">Dashboard</div><div class="page-sub">Monitor employee activity in real-time</div></div>
-    <div class="topbar-right"><div class="live-pill"><span class="pulse"></span>Live</div>
-      <button class="btn btn-sm" onclick="renderMain()"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button>
+    <div class="topbar-right"><div class="live-pill"><span class="pulse"></span><span class="rt-txt">Live</span></div>
+      <button class="btn btn-sm" onclick="CACHE.employees=null;renderMain()"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button>
     </div></div>
   <div class="content">${configBanner()}
     <div class="metrics">
@@ -666,6 +825,11 @@ function renderSettings(){
       <div class="field"><label>Supabase Anon Key</label><input type="text" id="cfg-key" value="${key}" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."/></div>
       <button class="btn btn-dark" onclick="saveConfig()">Save & Connect</button>
       <div style="font-size:12px;color:var(--text2);margin-top:10px">Get these from: <strong>supabase.com → Your Project → Settings → API</strong></div>
+      <div style="margin-top:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px">⚡ Enable Real-Time (required once)</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Run this in Supabase → SQL Editor after saving your config:</div>
+        <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text2);background:var(--card);padding:8px 10px;border-radius:6px;border:1px solid var(--border)">alter publication supabase_realtime add table employees, activity_logs, screenshots;</div>
+      </div>
     </div>
     <div class="settings-card">
       <div class="settings-card-title">Account</div>
@@ -783,7 +947,7 @@ async function downloadPersonalized(){
     supabase_url: SB_URL,
     supabase_anon_key: SB_KEY,
     employee_api_key: apiKey,
-    activity_interval_seconds: 10,
+    activity_interval_seconds: 5,
     screenshot_interval_seconds: 300,
     idle_threshold_seconds: 120
   }, null, 2);
@@ -1143,7 +1307,10 @@ function closeModal(){document.getElementById('modal').style.display='none';}
 document.body.classList.toggle('dark',S.dark);
 document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===S.page));
 renderMain();
-if(S.page==='dashboard') refreshTimer=setInterval(renderMain,15000);
+// Start real-time WebSocket subscription
+if(isConfigured()) startRealtime();
+// Also enable realtime in Supabase: run this SQL once in Supabase SQL Editor:
+// alter publication supabase_realtime add table employees, activity_logs, screenshots;
 </script>
 </body>
 </html>
