@@ -180,6 +180,7 @@ tr:last-child td{border-bottom:none}
 /* TOAST */
 .toast{position:fixed;bottom:22px;right:22px;background:var(--text);color:var(--sidebar);padding:10px 16px;border-radius:var(--radius-sm);font-size:13px;z-index:500;font-weight:500;animation:slideup .2s ease;max-width:320px}
 @keyframes slideup{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeInNew{from{opacity:0;background:var(--green-bg)}to{opacity:1;background:transparent}}
 .back-btn{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer;margin-bottom:16px;transition:color .15s}
 .back-btn:hover{color:var(--text)}
 .back-btn svg{width:15px;height:15px}
@@ -337,54 +338,46 @@ function startRealtime(){
       try{
         const msg = JSON.parse(event.data);
         const pgEvent = msg?.payload?.data;
+        if(msg.event !== 'postgres_changes' || !pgEvent) return;
 
-        // Handle postgres_changes events
-        if(msg.event === 'postgres_changes' && pgEvent){
-          const table  = pgEvent.table;
-          const type   = pgEvent.type;   // INSERT | UPDATE | DELETE
-          const record = pgEvent.record;
-          const old    = pgEvent.old_record;
+        const table  = pgEvent.table;
+        const type   = pgEvent.type;
+        const record = pgEvent.record;
+        const old    = pgEvent.old_record;
 
-          console.log('[RT] Change:', table, type, record);
-
-          if(table === 'employees'){
-            // Instantly update cache
-            if(type === 'UPDATE' && record){
-              if(CACHE.employees){
-                const idx = CACHE.employees.findIndex(e=>e.id===record.id);
-                if(idx>=0) CACHE.employees[idx] = {...CACHE.employees[idx], ...record};
-                else CACHE.employees.push(record);
-              }
-              // If detail page is open for this employee, patch it in-place
-              if(S.empView==='detail' && S.selectedEmp===record.id){
-                const curAppEl = document.getElementById('emp-curapp-'+record.id);
-                const lastSeenEl = document.getElementById('emp-lastseen-'+record.id);
-                if(curAppEl && record.current_app !== undefined) curAppEl.textContent = record.current_app||'—';
-                if(lastSeenEl && record.last_seen) lastSeenEl.textContent = timeAgo(record.last_seen);
-              }
-              // Show flash notification
-              showRTFlash(record.name + ' — ' + (record.status||'updated'), record.status);
-            } else if(type === 'INSERT' && record){
-              if(CACHE.employees) CACHE.employees.push(record);
-            } else if(type === 'DELETE' && old){
-              if(CACHE.employees) CACHE.employees = CACHE.employees.filter(e=>e.id!==old.id);
+        // ── employees table ──────────────────────────────
+        if(table === 'employees'){
+          if(type === 'UPDATE' && record){
+            // 1. Update cache silently
+            if(CACHE.employees){
+              const idx = CACHE.employees.findIndex(e=>e.id===record.id);
+              if(idx>=0) CACHE.employees[idx] = {...CACHE.employees[idx], ...record};
+              else CACHE.employees.push(record);
             }
+            // 2. Patch DOM in-place — no page reload
+            patchEmployeeInDOM(record);
+            showRTFlash(record.name + ' — ' + (record.status||'updated'), record.status);
           }
-
-          if(table === 'activity_logs' && type === 'INSERT'){
-            CACHE.lastActivity = record;
-            // If we're viewing this employee's detail page, re-render to show new log
-            if(S.empView==='detail' && S.selectedEmp===record.employee_id){
-              clearTimeout(debounceTimer);
-              debounceTimer = setTimeout(()=> renderMain(), 500);
-              return; // skip the generic debounce below
-            }
+          if(type === 'INSERT' && record){
+            if(CACHE.employees) CACHE.employees.push(record);
+            // Add new row to table if on dashboard or employees list
+            appendEmployeeRowInDOM(record);
           }
-
-          // Debounce re-render to avoid too many rapid redraws
-          clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(()=> renderMain(), 300);
+          if(type === 'DELETE' && old){
+            if(CACHE.employees) CACHE.employees = CACHE.employees.filter(e=>e.id!==old.id);
+            removeEmployeeRowInDOM(old.id);
+          }
         }
+
+        // ── activity_logs table ──────────────────────────
+        if(table === 'activity_logs' && type === 'INSERT' && record){
+          CACHE.lastActivity = record;
+          // Only patch if viewing that employee's activity tab
+          if(S.empView==='detail' && S.selectedEmp===record.employee_id && S.empTab==='activity'){
+            prependActivityRowInDOM(record);
+          }
+        }
+
       } catch(e){ /* ignore parse errors */ }
     };
 
@@ -418,6 +411,105 @@ function startRealtime(){
 
 function stopRealtime(){
   if(realtimeChannel){ try{ realtimeChannel.close(); }catch(e){} realtimeChannel=null; }
+}
+
+// ── DOM PATCH FUNCTIONS — update UI in-place, NEVER call renderMain() ────────
+
+function patchEmployeeInDOM(r){
+  const id = r.id;
+  const status = r.status || 'offline';
+
+  // 1. Status badge HTML
+  const badgeHtml = statusBadge(status);
+
+  // 2. Dashboard & Employees list rows — patch status badge + current app + last seen
+  document.querySelectorAll(`[data-emp-id="${id}"]`).forEach(row=>{
+    const badgeEl   = row.querySelector('[data-field="status"]');
+    const appEl     = row.querySelector('[data-field="current_app"]');
+    const seenEl    = row.querySelector('[data-field="last_seen"]');
+    if(badgeEl)  badgeEl.innerHTML = badgeHtml;
+    if(appEl  && r.current_app !== undefined) appEl.textContent = r.current_app||'—';
+    if(seenEl && r.last_seen)  seenEl.textContent = timeAgo(r.last_seen);
+  });
+
+  // 3. Metric counters on dashboard — recount from cache
+  patchMetricCounters();
+
+  // 4. Employee detail page — patch info boxes
+  const curAppEl   = document.getElementById('emp-curapp-'+id);
+  const lastSeenEl = document.getElementById('emp-lastseen-'+id);
+  const statusEl   = document.getElementById('emp-status-'+id);
+  if(curAppEl   && r.current_app !== undefined) curAppEl.textContent  = r.current_app||'—';
+  if(lastSeenEl && r.last_seen)  lastSeenEl.textContent = timeAgo(r.last_seen);
+  if(statusEl)   statusEl.innerHTML = badgeHtml;
+}
+
+function patchMetricCounters(){
+  if(!CACHE.employees) return;
+  const online  = CACHE.employees.filter(e=>e.status==='online').length;
+  const idle    = CACHE.employees.filter(e=>e.status==='idle').length;
+  const offline = CACHE.employees.filter(e=>e.status==='offline').length;
+  const total   = CACHE.employees.length;
+  const el = (id)=> document.getElementById(id);
+  if(el('metric-total'))   el('metric-total').textContent   = total;
+  if(el('metric-online'))  el('metric-online').textContent  = online;
+  if(el('metric-idle'))    el('metric-idle').textContent    = idle;
+  if(el('metric-offline')) el('metric-offline').textContent = offline;
+}
+
+function appendEmployeeRowInDOM(r){
+  // Add new employee row to dashboard and employees table bodies
+  document.querySelectorAll('.emp-tbody').forEach(tbody=>{
+    // Remove "no employees" empty row if present
+    const emptyRow = tbody.querySelector('.empty-row');
+    if(emptyRow) emptyRow.remove();
+    const tr = document.createElement('tr');
+    tr.className='tr-click';
+    tr.dataset.empId = r.id;
+    tr.setAttribute('onclick', `openEmp('${r.id}')`);
+    tr.innerHTML = `
+      <td><div style="display:flex;align-items:center;gap:10px">
+        <div class="avatar">${ini(r.name)}</div>
+        <div><div style="font-weight:500">${r.name}</div><div style="font-size:11px;color:var(--text3)">${r.device_id}</div></div>
+      </div></td>
+      <td data-field="status">${statusBadge(r.status)}</td>
+      <td data-field="current_app" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);font-size:12px">${r.current_app||'—'}</td>
+      <td style="color:var(--text2);font-size:12px">${r.device_id}</td>
+      <td data-field="last_seen" style="color:var(--blue);font-size:12px">${timeAgo(r.last_seen)}</td>`;
+    tbody.appendChild(tr);
+  });
+  patchMetricCounters();
+}
+
+function removeEmployeeRowInDOM(id){
+  document.querySelectorAll(`[data-emp-id="${id}"]`).forEach(el=>el.remove());
+  patchMetricCounters();
+}
+
+function prependActivityRowInDOM(a){
+  // Insert new activity at top of the activity list on the employee detail page
+  const list = document.getElementById('activity-list');
+  if(!list) return;
+  // Remove "no activity" empty message if present
+  const emptyEl = list.querySelector('.empty');
+  if(emptyEl) emptyEl.remove();
+
+  const div = document.createElement('div');
+  div.className = 'act-item';
+  div.style.animation = 'fadeInNew .4s ease';
+  div.innerHTML = `
+    <div style="flex:1;min-width:0">
+      <div class="act-app" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:480px">${a.app_name||'Unknown'}</div>
+      <div class="act-time">${fmtTime(a.logged_at)}</div>
+    </div>
+    <div class="act-right" style="gap:12px">
+      ${statusBadge(a.status)}
+      <span style="font-size:12px;color:var(--text3);font-family:'DM Mono',monospace;min-width:36px;text-align:right">${fmtDur(a.duration_seconds)}</span>
+    </div>`;
+  list.prepend(div);
+  // Update record count badge
+  const countEl = document.getElementById('activity-count');
+  if(countEl) countEl.textContent = '('+(parseInt(countEl.textContent.replace(/\D/g,''))||0)+1+' records)';
 }
 
 function updateRTIndicator(connected){
@@ -628,13 +720,13 @@ async function renderDashboard(){
   const online=emps.filter(e=>e.status==='online').length;
   const idle=emps.filter(e=>e.status==='idle').length;
   const offline=emps.filter(e=>e.status==='offline').length;
-  const rows=emps.map(e=>`<tr class="tr-click" onclick="openEmp('${e.id}')">
+  const rows=emps.map(e=>`<tr class="tr-click" data-emp-id="${e.id}" onclick="openEmp('${e.id}')">
     <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar">${ini(e.name)}</div>
       <div><div style="font-weight:500">${e.name}</div><div style="font-size:11px;color:var(--text3)">${e.device_id}</div></div></div></td>
-    <td>${statusBadge(e.status)}</td>
-    <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);font-size:12px">${e.current_app||'—'}</td>
+    <td data-field="status">${statusBadge(e.status)}</td>
+    <td data-field="current_app" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);font-size:12px">${e.current_app||'—'}</td>
     <td style="color:var(--text2);font-size:12px">${e.device_id}</td>
-    <td style="color:var(--blue);font-size:12px">${timeAgo(e.last_seen)}</td>
+    <td data-field="last_seen" style="color:var(--blue);font-size:12px">${timeAgo(e.last_seen)}</td>
   </tr>`).join('');
   return `
   <div class="topbar"><div class="topbar-left"><div class="page-title">Dashboard</div><div class="page-sub">Monitor employee activity in real-time</div></div>
@@ -643,14 +735,14 @@ async function renderDashboard(){
     </div></div>
   <div class="content">${configBanner()}
     <div class="metrics">
-      <div class="metric-card"><div><div class="metric-label">Total Employees</div><div class="metric-value">${emps.length}</div></div><div class="metric-icon" style="background:var(--bg)"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div></div>
-      <div class="metric-card"><div><div class="metric-label">Online</div><div class="metric-value" style="color:var(--green)">${online}</div></div><div class="metric-icon" style="background:var(--green-bg)"><svg fill="none" stroke="var(--green)" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div></div>
-      <div class="metric-card"><div><div class="metric-label">Idle</div><div class="metric-value" style="color:var(--amber)">${idle}</div></div><div class="metric-icon" style="background:var(--amber-bg)"><svg fill="none" stroke="var(--amber)" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div></div>
-      <div class="metric-card"><div><div class="metric-label">Offline</div><div class="metric-value" style="color:var(--red)">${offline}</div></div><div class="metric-icon" style="background:var(--red-bg)"><svg fill="none" stroke="var(--red)" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div></div>
+      <div class="metric-card"><div><div class="metric-label">Total Employees</div><div class="metric-value" id="metric-total">${emps.length}</div></div><div class="metric-icon" style="background:var(--bg)"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div></div>
+      <div class="metric-card"><div><div class="metric-label">Online</div><div class="metric-value" id="metric-online" style="color:var(--green)">${online}</div></div><div class="metric-icon" style="background:var(--green-bg)"><svg fill="none" stroke="var(--green)" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div></div>
+      <div class="metric-card"><div><div class="metric-label">Idle</div><div class="metric-value" id="metric-idle" style="color:var(--amber)">${idle}</div></div><div class="metric-icon" style="background:var(--amber-bg)"><svg fill="none" stroke="var(--amber)" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div></div>
+      <div class="metric-card"><div><div class="metric-label">Offline</div><div class="metric-value" id="metric-offline" style="color:var(--red)">${offline}</div></div><div class="metric-icon" style="background:var(--red-bg)"><svg fill="none" stroke="var(--red)" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div></div>
     </div>
     <div class="table-card"><div class="table-hdr"><div class="table-title">Employee Activity</div></div>
       <table><thead><tr><th>Employee</th><th>Status</th><th>Current App</th><th>Device</th><th>Last Seen</th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="5"><div class="empty">No employees yet. Add one in the Employees page.</div></td></tr>'}</tbody></table>
+      <tbody class="emp-tbody">${rows||'<tr class="empty-row"><td colspan="5"><div class="empty">No employees yet. Add one in the Employees page.</div></td></tr>'}</tbody></table>
     </div></div>`;
 }
 
@@ -659,13 +751,13 @@ async function renderEmployees(){
   const emps = await fetchEmployees();
   const q=(S.search||'').toLowerCase();
   const list=emps.filter(e=>!q||e.name.toLowerCase().includes(q)||e.device_id.toLowerCase().includes(q));
-  const rows=list.map(e=>`<tr class="tr-click" onclick="openEmp('${e.id}')">
+  const rows=list.map(e=>`<tr class="tr-click" data-emp-id="${e.id}" onclick="openEmp('${e.id}')">
     <td><div style="display:flex;align-items:center;gap:10px"><div class="avatar">${ini(e.name)}</div>
       <div><div style="font-weight:500">${e.name}</div><div style="font-size:11px;color:var(--text3)">${e.device_id}</div></div></div></td>
-    <td>${statusBadge(e.status)}</td>
-    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);font-size:12px">${e.current_app||'—'}</td>
+    <td data-field="status">${statusBadge(e.status)}</td>
+    <td data-field="current_app" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);font-size:12px">${e.current_app||'—'}</td>
     <td style="color:var(--text2);font-size:12px">${e.device_id}</td>
-    <td style="color:var(--blue);font-size:12px">${timeAgo(e.last_seen)}</td>
+    <td data-field="last_seen" style="color:var(--blue);font-size:12px">${timeAgo(e.last_seen)}</td>
   </tr>`).join('');
   return `
   <div class="topbar"><div class="topbar-left"><div class="page-title">Employees</div><div class="page-sub">Manage and monitor your team</div></div>
@@ -675,7 +767,7 @@ async function renderEmployees(){
       <div class="search-wrap"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input id="srch" placeholder="Search employees..." value="${S.search||''}" oninput="S.search=this.value;renderMain()"/></div></div>
       <table><thead><tr><th>Employee</th><th>Status</th><th>Current App</th><th>Device</th><th>Last Seen</th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="5"><div class="empty">No employees found</div></td></tr>'}</tbody></table>
+      <tbody class="emp-tbody">${rows||'<tr class="empty-row"><td colspan="5"><div class="empty">No employees found</div></td></tr>'}</tbody></table>
     </div></div>`;
 }
 
@@ -697,16 +789,16 @@ async function renderEmpDetail(){
   const actTab = `
     <div style="padding:0 4px">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 10px;border-bottom:1px solid var(--border);margin-bottom:4px">
-        <div style="font-size:13px;font-weight:600">Recent Activity <span style="font-weight:400;color:var(--text3);font-size:12px">(${logs.length} records)</span></div>
+        <div style="font-size:13px;font-weight:600">Recent Activity <span id="activity-count" style="font-weight:400;color:var(--text3);font-size:12px">(${logs.length} records)</span></div>
         <button class="btn btn-sm" onclick="exportCSV('${e.id}')">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Export CSV
         </button>
       </div>
+      <div id="activity-list">
       ${logs.length === 0
         ? `<div class="empty" style="padding:48px">No activity recorded yet for this employee.</div>`
         : logs.map(a=>{
             const dur = a.duration_seconds||0;
-            const pct = totalSec>0 ? Math.min(100, Math.round(dur/totalSec*100)) : 0;
             return `<div class="act-item">
               <div style="flex:1;min-width:0">
                 <div class="act-app" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:480px">${a.app_name||'Unknown'}</div>
@@ -719,6 +811,7 @@ async function renderEmpDetail(){
             </div>`;
           }).join('')
       }
+      </div>
     </div>`;
 
   // ── Charts Tab ──
@@ -854,7 +947,7 @@ async function renderEmpDetail(){
         <div>
           <div style="display:flex;align-items:center;gap:8px">
             <span style="font-size:17px;font-weight:600">${e.name}</span>
-            ${statusBadge(e.status)}
+            <span id="emp-status-${e.id}">${statusBadge(e.status)}</span>
           </div>
           <div style="font-size:12px;color:var(--text2)">${e.department||'—'} · ${e.device_id}</div>
         </div>
