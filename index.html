@@ -351,6 +351,13 @@ function startRealtime(){
                 if(idx>=0) CACHE.employees[idx] = {...CACHE.employees[idx], ...record};
                 else CACHE.employees.push(record);
               }
+              // If detail page is open for this employee, patch it in-place
+              if(S.empView==='detail' && S.selectedEmp===record.id){
+                const curAppEl = document.getElementById('emp-curapp-'+record.id);
+                const lastSeenEl = document.getElementById('emp-lastseen-'+record.id);
+                if(curAppEl && record.current_app !== undefined) curAppEl.textContent = record.current_app||'—';
+                if(lastSeenEl && record.last_seen) lastSeenEl.textContent = timeAgo(record.last_seen);
+              }
               // Show flash notification
               showRTFlash(record.name + ' — ' + (record.status||'updated'), record.status);
             } else if(type === 'INSERT' && record){
@@ -362,6 +369,12 @@ function startRealtime(){
 
           if(table === 'activity_logs' && type === 'INSERT'){
             CACHE.lastActivity = record;
+            // If we're viewing this employee's detail page, re-render to show new log
+            if(S.empView==='detail' && S.selectedEmp===record.employee_id){
+              clearTimeout(debounceTimer);
+              debounceTimer = setTimeout(()=> renderMain(), 500);
+              return; // skip the generic debounce below
+            }
           }
 
           // Debounce re-render to avoid too many rapid redraws
@@ -612,72 +625,244 @@ async function renderEmployees(){
 }
 
 async function renderEmpDetail(){
-  const emps=await fetchEmployees();
-  const e=emps.find(x=>x.id===S.selectedEmp);
-  if(!e){S.empView='list';return renderEmployees();}
+  const emps = await fetchEmployees();
+  const e = emps.find(x=>x.id===S.selectedEmp);
+  if(!e){ S.empView='list'; return renderEmployees(); }
 
-  const logs=await fetchActivity(e.id);
-  const shots=await fetchScreenshots(e.id);
+  const logs  = await fetchActivity(e.id, 100);
+  const shots = await fetchScreenshots(e.id, 24);
 
-  const actTab=`<div>${logs.map(a=>`<div class="act-item">
-    <div><div class="act-app">${a.app_name}</div><div class="act-time">${fmtTime(a.logged_at)}</div></div>
-    <div class="act-right">${statusBadge(a.status)}<span style="font-size:12px;color:var(--text3);font-family:'DM Mono',monospace">${fmtDur(a.duration_seconds)}</span></div>
-  </div>`).join('')}${!logs.length?'<div class="empty">No activity recorded yet</div>':''}</div>`;
+  // ── Compute stats from logs ──
+  const totalSec  = logs.reduce((s,l)=>s+(l.duration_seconds||0),0);
+  const onlineSec = logs.filter(l=>l.status==='online').reduce((s,l)=>s+(l.duration_seconds||0),0);
+  const idleSec   = logs.filter(l=>l.status==='idle').reduce((s,l)=>s+(l.duration_seconds||0),0);
+  const score     = totalSec>0 ? Math.round(onlineSec/totalSec*100) : 0;
 
-  const appMap={};
-  logs.forEach(l=>{const k=l.app_name.split(' - ')[0];appMap[k]=(appMap[k]||0)+l.duration_seconds;});
-  const topApps=Object.entries(appMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const maxSec=topApps[0]?.[1]||1;
-  const chartTab=`<div>
-    <div style="font-size:13px;font-weight:600;margin-bottom:14px">App Usage (by duration)</div>
-    <div class="bar-chart">${topApps.map(([app,sec])=>{
-      const h=Math.round(sec/maxSec*110);
-      return `<div class="bar-col"><div class="bar-val">${fmtDur(sec)}</div>
-        <div class="bar-fill" style="height:${h}px;background:var(--text);opacity:.75"></div>
-        <div class="bar-lbl">${app.slice(0,10)}</div></div>`;
-    }).join('')}${!topApps.length?'<div class="empty">No data yet</div>':''}</div>
-  </div>`;
+  // ── Activity Log Tab ──
+  const actTab = `
+    <div style="padding:0 4px">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 10px;border-bottom:1px solid var(--border);margin-bottom:4px">
+        <div style="font-size:13px;font-weight:600">Recent Activity <span style="font-weight:400;color:var(--text3);font-size:12px">(${logs.length} records)</span></div>
+        <button class="btn btn-sm" onclick="exportCSV('${e.id}')">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Export CSV
+        </button>
+      </div>
+      ${logs.length === 0
+        ? `<div class="empty" style="padding:48px">No activity recorded yet for this employee.</div>`
+        : logs.map(a=>{
+            const dur = a.duration_seconds||0;
+            const pct = totalSec>0 ? Math.min(100, Math.round(dur/totalSec*100)) : 0;
+            return `<div class="act-item">
+              <div style="flex:1;min-width:0">
+                <div class="act-app" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:480px">${a.app_name||'Unknown'}</div>
+                <div class="act-time">${fmtTime(a.logged_at)}</div>
+              </div>
+              <div class="act-right" style="gap:12px">
+                ${statusBadge(a.status)}
+                <span style="font-size:12px;color:var(--text3);font-family:'DM Mono',monospace;min-width:36px;text-align:right">${fmtDur(dur)}</span>
+              </div>
+            </div>`;
+          }).join('')
+      }
+    </div>`;
 
-  const shotTab = shots.length
-    ? `<div class="screenshot-grid">${shots.map(s=>`<div class="screenshot-item">
-        <img src="${s.file_url}" alt="screenshot" onerror="this.src='data:image/svg+xml,<svg viewBox=\\'0 0 100 60\\'><rect width=\\'100\\' height=\\'60\\'  fill=\\'%23e5e7eb\\'/><text x=\\'50\\' y=\\'35\\' text-anchor=\\'middle\\' font-size=\\'10\\' fill=\\'%239ca3af\\'>No image</text></svg>'"/>
-        <div class="screenshot-time">${fmtTime(s.taken_at)}</div>
-      </div>`).join('')}</div>`
-    : `<div class="empty">No screenshots yet. Screenshots are taken automatically by the desktop agent every 5 minutes.</div>`;
+  // ── Charts Tab ──
+  const appMap = {};
+  logs.forEach(l=>{
+    const k = (l.app_name||'Unknown').split(' - ')[0].trim().slice(0,28);
+    appMap[k] = (appMap[k]||0) + (l.duration_seconds||0);
+  });
+  const topApps = Object.entries(appMap).sort((a,b)=>b[1]-a[1]).slice(0,7);
 
-  const tabContent={activity:actTab, charts:chartTab, screenshots:shotTab}[S.empTab]||actTab;
+  const dayMap = new Array(7).fill(0);
+  logs.forEach(l=>{ const d=new Date(l.logged_at).getDay(); dayMap[d]+=(l.duration_seconds||0)/3600; });
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const maxDay = Math.max(...dayMap, 0.1);
+
+  const chartTab = `
+    <div style="padding:4px">
+      <!-- Summary stats row -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0 20px">
+        <div style="background:var(--bg);border-radius:10px;padding:14px 16px;text-align:center">
+          <div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Total Time</div>
+          <div style="font-size:22px;font-weight:600">${fmtDur(totalSec)}</div>
+        </div>
+        <div style="background:var(--bg);border-radius:10px;padding:14px 16px;text-align:center">
+          <div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Active</div>
+          <div style="font-size:22px;font-weight:600;color:var(--green)">${fmtDur(onlineSec)}</div>
+        </div>
+        <div style="background:var(--bg);border-radius:10px;padding:14px 16px;text-align:center">
+          <div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Idle</div>
+          <div style="font-size:22px;font-weight:600;color:var(--amber)">${fmtDur(idleSec)}</div>
+        </div>
+        <div style="background:var(--bg);border-radius:10px;padding:14px 16px;text-align:center">
+          <div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Productivity</div>
+          <div style="font-size:22px;font-weight:600;color:var(--blue)">${score}%</div>
+        </div>
+      </div>
+
+      <!-- Two charts side by side -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px">
+        <div style="background:var(--bg);border-radius:12px;padding:16px 18px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:14px">Daily Activity (hours)</div>
+          <div style="display:flex;align-items:flex-end;gap:6px;height:120px;border-bottom:1px solid var(--border);padding-bottom:0">
+            ${days.map((d,i)=>{
+              const h = dayMap[i];
+              const px = Math.round(h/maxDay*110);
+              const isToday = i===new Date().getDay();
+              return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+                <div style="font-size:10px;color:var(--text2)">${h>0?h.toFixed(1):''}</div>
+                <div style="height:${px}px;width:100%;background:${isToday?'var(--green)':'var(--text)'};opacity:${isToday?1:.55};border-radius:3px 3px 0 0;min-height:${h>0?3:0}px"></div>
+                <div style="font-size:10px;color:${isToday?'var(--green)':'var(--text3)'};font-weight:${isToday?'600':'400'}">${d}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+        <div style="background:var(--bg);border-radius:12px;padding:16px 18px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:14px">Active vs Idle</div>
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;height:140px">
+            <svg width="110" height="110" viewBox="0 0 42 42">
+              <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="var(--border)" stroke-width="5"/>
+              <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#15803d" stroke-width="5"
+                stroke-dasharray="${score} ${100-score}" stroke-dashoffset="25" transform="rotate(-90 21 21)"/>
+              <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#b45309" stroke-width="5"
+                stroke-dasharray="${Math.round(idleSec/Math.max(totalSec,1)*100)} 100" stroke-dashoffset="${-(score)}" transform="rotate(-90 21 21)"/>
+            </svg>
+            <div style="font-size:11px;color:var(--text2);display:flex;gap:12px">
+              <span><span style="display:inline-block;width:8px;height:8px;background:var(--green);border-radius:2px;margin-right:4px"></span>Active ${score}%</span>
+              <span><span style="display:inline-block;width:8px;height:8px;background:var(--amber);border-radius:2px;margin-right:4px"></span>Idle ${100-score}%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- App usage table -->
+      <div style="background:var(--bg);border-radius:12px;padding:16px 18px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:14px">Top Applications</div>
+        ${topApps.length===0
+          ? '<div class="empty">No data yet</div>'
+          : topApps.map(([app,sec],i)=>{
+              const pct = totalSec>0?Math.round(sec/totalSec*100):0;
+              const barW = topApps[0][1]>0?Math.round(sec/topApps[0][1]*100):0;
+              const colors=['#1d4ed8','#15803d','#b45309','#b91c1c','#6d28d9','#0e7490','#374151'];
+              return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)">
+                <div style="width:22px;height:22px;border-radius:6px;background:${colors[i]||'#374151'};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${i+1}</div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${app}</div>
+                  <div style="height:4px;background:var(--border);border-radius:2px;margin-top:5px;overflow:hidden">
+                    <div style="height:100%;width:${barW}%;background:${colors[i]||'#374151'};border-radius:2px;transition:width .4s"></div>
+                  </div>
+                </div>
+                <div style="text-align:right;flex-shrink:0">
+                  <div style="font-size:12px;font-weight:600;font-family:'DM Mono',monospace">${fmtDur(sec)}</div>
+                  <div style="font-size:11px;color:var(--text3)">${pct}%</div>
+                </div>
+              </div>`;
+            }).join('')
+        }
+      </div>
+    </div>`;
+
+  // ── Screenshots Tab ──
+  const shotTab = shots.length === 0
+    ? `<div style="text-align:center;padding:56px 20px;color:var(--text3)">
+        <div style="font-size:40px;margin-bottom:12px">📷</div>
+        <div style="font-size:14px;font-weight:500;margin-bottom:6px">No screenshots yet</div>
+        <div style="font-size:12px">Screenshots are captured automatically every 5 minutes by the desktop agent.</div>
+      </div>`
+    : `<div style="padding:14px 4px 4px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <div style="font-size:13px;font-weight:600">${shots.length} Screenshot${shots.length!==1?'s':''}</div>
+          <div style="font-size:12px;color:var(--text3)">Captured every 5 minutes</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          ${shots.map(s=>`
+            <div style="border-radius:8px;overflow:hidden;border:1px solid var(--border);cursor:pointer;transition:opacity .15s" onclick="window.open('${s.file_url}','_blank')" title="Click to open full size">
+              <img src="${s.file_url}" alt="screenshot"
+                style="width:100%;height:130px;object-fit:cover;display:block;background:var(--bg)"
+                onerror="this.parentElement.innerHTML='<div style=\\'height:130px;display:flex;align-items:center;justify-content:center;background:var(--bg);font-size:12px;color:var(--text3)\\'>Image unavailable</div>'"/>
+              <div style="padding:6px 9px;font-size:10px;color:var(--text3);font-family:DM Mono,monospace;border-top:1px solid var(--border);background:var(--card)">${fmtTime(s.taken_at)}</div>
+            </div>`).join('')}
+        </div>
+      </div>`;
+
+  const tabContent = {activity:actTab, charts:chartTab, screenshots:shotTab}[S.empTab] || actTab;
 
   return `
-  <div class="topbar"><div class="topbar-left"><div class="page-title">${e.name}</div><div class="page-sub">${e.device_id}</div></div>
-    <div class="topbar-right">
-      <button class="btn btn-red btn-sm" onclick="deleteEmp('${e.id}')"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Delete</button>
-      <button class="btn btn-sm" onclick="exportCSV('${e.id}')"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Export CSV</button>
-    </div></div>
-  <div class="content">
-    <div class="back-btn" onclick="S.empView='list';renderMain()"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>Employees</div>
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
-      <div class="avatar" style="width:46px;height:46px;font-size:15px">${ini(e.name)}</div>
-      <div><div style="font-size:20px;font-weight:600;display:flex;align-items:center;gap:10px">${e.name} ${statusBadge(e.status)}</div>
-        <div style="font-size:13px;color:var(--text2)">${e.department||''} · ${e.device_id}</div></div>
-    </div>
-    <div class="info-strip">
-      <div class="info-box"><div class="info-box-label"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Last Seen</div><div class="info-box-val">${timeAgo(e.last_seen)}</div></div>
-      <div class="info-box"><div class="info-box-label"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>Current App</div><div class="info-box-val" style="font-size:12px">${e.current_app||'—'}</div></div>
-      <div class="info-box"><div class="info-box-label"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3"/></svg>API Key</div>
-        <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
-          <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3)" id="apk-${e.id}">••••••••••••</div>
-          <button class="btn btn-sm" style="padding:3px 7px" onclick="toggleApiKey('${e.id}','${e.api_key}')"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-          <button class="btn btn-sm" style="padding:3px 7px" onclick="navigator.clipboard.writeText('${e.api_key}');toast('API key copied!')"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+  <div class="topbar">
+    <div class="topbar-left">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="back-btn" style="margin:0" onclick="S.empView='list';renderMain()">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="18" height="18"><polyline points="15 18 9 12 15 6"/></svg>
+        </div>
+        <div class="avatar" style="width:36px;height:36px;font-size:13px">${ini(e.name)}</div>
+        <div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:17px;font-weight:600">${e.name}</span>
+            ${statusBadge(e.status)}
+          </div>
+          <div style="font-size:12px;color:var(--text2)">${e.department||'—'} · ${e.device_id}</div>
         </div>
       </div>
     </div>
-    <div class="tabs">
-      <div class="tab ${S.empTab==='activity'?'active':''}" onclick="S.empTab='activity';renderMain()">Activity Log</div>
-      <div class="tab ${S.empTab==='charts'?'active':''}" onclick="S.empTab='charts';renderMain()">Charts</div>
-      <div class="tab ${S.empTab==='screenshots'?'active':''}" onclick="S.empTab='screenshots';renderMain()">Screenshots</div>
+    <div class="topbar-right">
+      <button class="btn btn-sm" onclick="exportCSV('${e.id}')">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Export CSV
+      </button>
+      <button class="btn btn-red btn-sm" onclick="deleteEmp('${e.id}')">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Delete
+      </button>
     </div>
-    <div class="table-card" style="padding:4px 18px">${tabContent}</div>
+  </div>
+  <div class="content">
+    <!-- Info cards -->
+    <div class="info-strip" style="margin-bottom:18px">
+      <div class="info-box">
+        <div class="info-box-label">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Last Seen
+        </div>
+        <div class="info-box-val" id="emp-lastseen-${e.id}">${timeAgo(e.last_seen)}</div>
+      </div>
+      <div class="info-box">
+        <div class="info-box-label">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          Current App
+        </div>
+        <div class="info-box-val" id="emp-curapp-${e.id}" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.current_app||'—'}</div>
+      </div>
+      <div class="info-box">
+        <div class="info-box-label">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3"/></svg>
+          API Key
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+          <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text3)" id="apk-${e.id}">••••••••••••</div>
+          <button class="btn btn-sm" style="padding:3px 7px" onclick="toggleApiKey('${e.id}','${e.api_key}')">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <button class="btn btn-sm" style="padding:3px 7px" onclick="navigator.clipboard.writeText('${e.api_key}');toast('API key copied!')">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab ${S.empTab==='activity'?'active':''}" onclick="S.empTab='activity';saveState(S);renderMain()">
+        Activity Log ${logs.length>0?`<span style="margin-left:4px;background:var(--bg);padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600">${logs.length}</span>`:''}
+      </div>
+      <div class="tab ${S.empTab==='charts'?'active':''}" onclick="S.empTab='charts';saveState(S);renderMain()">Charts</div>
+      <div class="tab ${S.empTab==='screenshots'?'active':''}" onclick="S.empTab='screenshots';saveState(S);renderMain()">
+        Screenshots ${shots.length>0?`<span style="margin-left:4px;background:var(--bg);padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600">${shots.length}</span>`:''}
+      </div>
+    </div>
+
+    <!-- Tab content -->
+    <div class="table-card" style="padding:0 16px 8px">${tabContent}</div>
   </div>`;
+}
 }
 
 function openEmp(id){S.selectedEmp=id;S.empView='detail';S.empTab='activity';saveState(S);nav('employees');}
