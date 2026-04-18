@@ -238,7 +238,9 @@ const STORE = 'at_state_v2';
 function loadState(){try{return JSON.parse(localStorage.getItem(STORE)||'null');}catch(e){return null;}}
 function saveState(s){localStorage.setItem(STORE,JSON.stringify(s));}
 
-let S = loadState() || {dark:false, page:'dashboard', empView:'list', selectedEmp:null, empTab:'activity'};
+let S = loadState() || {dark:false, page:'dashboard', empView:'list', selectedEmp:null, empTab:'activity', analyticsPeriod:'week', analyticsEmp:'all'};
+if(!S.analyticsPeriod) S.analyticsPeriod='week';
+if(!S.analyticsEmp)    S.analyticsEmp='all';
 const isConfigured = ()=> SUPABASE_URL && SUPABASE_ANON_KEY && !SUPABASE_URL.includes('YOUR_PROJECT');
 
 // ── IN-MEMORY CACHE (updated by real-time) ────────
@@ -471,15 +473,49 @@ async function fetchScreenshots(empId, limit=12){
   return data || [];
 }
 
-async function fetchAnalytics(){
-  if(!isConfigured()) return demoAnalytics();
-  const emps = await fetchEmployees();
-  const weekAgo = new Date(Date.now()-7*24*3600*1000).toISOString();
-  const logs = await sb('GET','activity_logs',null,{
-    select:'employee_id,status,duration_seconds,logged_at,app_name',
-    logged_at:`gte.${weekAgo}`, order:'logged_at.desc'
-  });
-  return {emps, logs: logs||[]};
+async function fetchAnalytics(period='week', empId='all'){
+  const allEmps = await fetchEmployees();
+
+  // Build date range
+  const now = new Date();
+  let fromDate;
+  if(period==='today'){
+    fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  } else if(period==='week'){
+    const day = now.getDay();
+    fromDate = new Date(now); fromDate.setDate(now.getDate()-day); fromDate.setHours(0,0,0,0);
+  } else if(period==='month'){
+    fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  } else {
+    fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()-6);
+  }
+
+  if(!isConfigured()){
+    // Filter demo data by period and employee
+    let logs = demoActivity();
+    logs = logs.filter(l=> new Date(l.logged_at) >= fromDate);
+    if(empId !== 'all'){
+      logs = logs.map(l=>({...l, employee_id: empId})); // assign to selected emp in demo
+    } else {
+      // distribute demo logs across demo employees
+      const empIds = allEmps.map(e=>e.id);
+      logs = logs.map((l,i)=>({...l, employee_id: empIds[i % empIds.length]}));
+    }
+    const filteredEmps = empId==='all' ? allEmps : allEmps.filter(e=>e.id===empId);
+    return {emps: filteredEmps, allEmps, logs};
+  }
+
+  const params = {
+    select: 'employee_id,status,duration_seconds,logged_at,app_name',
+    logged_at: 'gte.'+fromDate.toISOString(),
+    order: 'logged_at.desc',
+    limit: 2000
+  };
+  if(empId !== 'all') params.employee_id = 'eq.'+empId;
+
+  const logs = await sb('GET','activity_logs',null,params);
+  const filteredEmps = empId==='all' ? allEmps : allEmps.filter(e=>e.id===empId);
+  return {emps: filteredEmps, allEmps, logs: logs||[]};
 }
 
 async function addEmployee(data){
@@ -878,93 +914,196 @@ function openEmp(id){
 
 // ── ANALYTICS ──────────────────────────────────
 async function renderAnalytics(){
-  const {emps,logs} = await fetchAnalytics();
-  const totalSec=logs.reduce((s,l)=>s+(l.duration_seconds||0),0);
-  const workSec=logs.filter(l=>l.status==='online').reduce((s,l)=>s+(l.duration_seconds||0),0);
-  const idleSec=logs.filter(l=>l.status==='idle').reduce((s,l)=>s+(l.duration_seconds||0),0);
-  const score=totalSec>0?Math.round(workSec/totalSec*100):0;
+  const period = S.analyticsPeriod || 'week';
+  const empId  = S.analyticsEmp    || 'all';
 
-  const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const dayTotals=new Array(7).fill(0);
-  logs.forEach(l=>{const d=new Date(l.logged_at).getDay();dayTotals[d]+=(l.duration_seconds||0)/3600;});
-  const maxD=Math.max(...dayTotals,0.1);
-  const barChart=days.map((d,i)=>{
-    const h=Math.round(dayTotals[i]/maxD*110);
-    return `<div class="bar-col"><div class="bar-val">${dayTotals[i].toFixed(1)}h</div>
-      <div class="bar-fill" style="height:${h}px;background:var(--green)"></div>
-      <div class="bar-lbl">${d}</div></div>`;
-  }).join('');
+  const {emps, allEmps, logs} = await fetchAnalytics(period, empId);
 
-  const appMap={};
-  logs.forEach(l=>{const k=(l.app_name||'').split(' - ')[0].slice(0,20);appMap[k]=(appMap[k]||0)+(l.duration_seconds||0);});
-  const appRows=Object.entries(appMap).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([app,sec])=>{
-    const pct=totalSec>0?Math.round(sec/totalSec*100):0;
-    return `<tr><td>${app}</td><td style="font-family:'DM Mono',monospace;font-size:12px">${fmtDur(sec)}</td><td style="font-family:'DM Mono',monospace;font-size:12px">${pct}%</td><td>${statusBadge('online')}</td></tr>`;
-  }).join('');
+  const totalSec = logs.reduce((s,l)=>s+(l.duration_seconds||0),0);
+  const workSec  = logs.filter(l=>l.status==='online').reduce((s,l)=>s+(l.duration_seconds||0),0);
+  const idleSec  = logs.filter(l=>l.status==='idle').reduce((s,l)=>s+(l.duration_seconds||0),0);
+  const score    = totalSec>0 ? Math.round(workSec/totalSec*100) : 0;
 
-  const empMap={};
+  // Daily bar chart — only show days in selected period
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const dayTotals = new Array(7).fill(0);
+  const dayIdle   = new Array(7).fill(0);
   logs.forEach(l=>{
-    if(!empMap[l.employee_id]) empMap[l.employee_id]={total:0,work:0};
-    empMap[l.employee_id].total+=(l.duration_seconds||0);
-    if(l.status==='online') empMap[l.employee_id].work+=(l.duration_seconds||0);
+    const d = new Date(l.logged_at).getDay();
+    dayTotals[d] += (l.duration_seconds||0)/3600;
+    if(l.status==='idle') dayIdle[d] += (l.duration_seconds||0)/3600;
   });
-  const rankRows=emps.map((e,i)=>{
-    const d=empMap[e.id]||{total:0,work:0};
-    const pct=d.total>0?Math.round(d.work/d.total*100):0;
-    const col=pct>=70?'var(--green)':pct>=50?'var(--amber)':'var(--red)';
-    return `<tr><td style="font-weight:600;color:var(--text3)">${i+1}</td>
-      <td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="width:26px;height:26px;font-size:10px">${ini(e.name)}</div>${e.name}</div></td>
-      <td style="font-family:'DM Mono',monospace;font-size:12px">${fmtDur(d.total)}</td>
-      <td style="min-width:140px"><div class="rank-bar-wrap">
-        <div class="rank-bar-track"><div class="rank-bar-fill" style="width:${pct}%;background:${col}"></div></div>
-        <span style="font-size:12px;font-weight:600;color:${col}">${pct}%</span></div></td>
+  const maxD = Math.max(...dayTotals, 0.01);
+  const today = new Date().getDay();
+
+  const barChart = days.map((d,i)=>{
+    const h     = dayTotals[i];
+    const hIdle = dayIdle[i];
+    const px    = Math.round(h/maxD*110);
+    const pxI   = Math.round(hIdle/maxD*110);
+    const isToday = i===today;
+    return `<div class="bar-col">
+      <div class="bar-val">${h>0?h.toFixed(1)+'h':''}</div>
+      <div style="position:relative;height:${px||2}px;width:100%">
+        <div style="position:absolute;bottom:0;width:100%;height:${px}px;background:var(--green);opacity:${isToday?1:.6};border-radius:3px 3px 0 0"></div>
+        ${pxI>0?`<div style="position:absolute;bottom:0;width:100%;height:${pxI}px;background:var(--amber);opacity:.8;border-radius:3px 3px 0 0"></div>`:''}
+      </div>
+      <div class="bar-lbl" style="color:${isToday?'var(--green)':'var(--text3)'};font-weight:${isToday?600:400}">${d}</div>
+    </div>`;
+  }).join('');
+
+  // App usage
+  const appMap = {};
+  logs.forEach(l=>{
+    const k = (l.app_name||'Unknown').split(' - ')[0].trim().slice(0,24);
+    appMap[k] = (appMap[k]||0)+(l.duration_seconds||0);
+  });
+  const appRows = Object.entries(appMap).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([app,sec])=>{
+    const pct = totalSec>0?Math.round(sec/totalSec*100):0;
+    return `<tr>
+      <td style="font-size:13px">${app}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${fmtDur(sec)}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${pct}%</td>
+      <td>${statusBadge('online')}</td>
     </tr>`;
   }).join('');
 
+  // Employee ranking (use allEmps so all show even if filtered to one)
+  const empMap = {};
+  logs.forEach(l=>{
+    if(!empMap[l.employee_id]) empMap[l.employee_id]={total:0,work:0};
+    empMap[l.employee_id].total += (l.duration_seconds||0);
+    if(l.status==='online') empMap[l.employee_id].work += (l.duration_seconds||0);
+  });
+  const rankEmps = empId==='all' ? allEmps : allEmps.filter(e=>e.id===empId);
+  const rankRows = rankEmps.map((e,i)=>{
+    const d   = empMap[e.id]||{total:0,work:0};
+    const pct = d.total>0?Math.round(d.work/d.total*100):0;
+    const col = pct>=70?'var(--green)':pct>=50?'var(--amber)':'var(--red)';
+    return `<tr>
+      <td style="font-weight:600;color:var(--text3);font-size:13px">${i+1}</td>
+      <td><div style="display:flex;align-items:center;gap:8px">
+        <div class="avatar" style="width:26px;height:26px;font-size:10px">${ini(e.name)}</div>
+        <span style="font-size:13px">${e.name}</span>
+      </div></td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${fmtDur(d.total)}</td>
+      <td style="min-width:160px"><div class="rank-bar-wrap">
+        <div class="rank-bar-track"><div class="rank-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+        <span style="font-size:12px;font-weight:600;color:${col};min-width:36px;text-align:right">${pct}%</span>
+      </div></td>
+    </tr>`;
+  }).join('');
+
+  const periodLabel = {today:'Today',week:'This Week',month:'This Month'}[period]||'This Week';
+  const empLabel    = empId==='all'?'All Employees':((allEmps||[]).find(e=>e.id===empId)?.name||'Employee');
+
   return `
-  <div class="topbar"><div class="topbar-left"><div class="page-title">Productivity Analytics</div><div class="page-sub">Analyze team performance and activity patterns</div></div>
-    <div class="topbar-right"><button class="btn btn-dark" onclick="exportAnalytics()"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export CSV</button></div></div>
+  <div class="topbar">
+    <div class="topbar-left"><div class="page-title">Productivity Analytics</div><div class="page-sub">Analyze team performance and activity patterns</div></div>
+    <div class="topbar-right">
+      <button class="btn btn-dark" onclick="doExportAnalytics()">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export CSV
+      </button>
+    </div>
+  </div>
   <div class="content">${configBanner()}
+
+    <!-- FILTERS -->
     <div class="filter-row">
-      <button class="pill" onclick="pillActive(this)">Today</button>
-      <button class="pill active" onclick="pillActive(this)">This Week</button>
-      <button class="pill" onclick="pillActive(this)">This Month</button>
-      <select style="padding:6px 12px;border-radius:20px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;outline:none">
-        <option>All Employees</option>${emps.map(e=>`<option>${e.name}</option>`).join('')}
+      <button class="pill ${period==='today'?'active':''}" onclick="setAnalyticsPeriod('today')">Today</button>
+      <button class="pill ${period==='week'?'active':''}"  onclick="setAnalyticsPeriod('week')">This Week</button>
+      <button class="pill ${period==='month'?'active':''}" onclick="setAnalyticsPeriod('month')">This Month</button>
+      <select id="analytics-emp-select"
+        style="padding:6px 14px;border-radius:20px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;outline:none;cursor:pointer"
+        onchange="setAnalyticsEmp(this.value)">
+        <option value="all" ${empId==='all'?'selected':''}>All Employees</option>
+        ${(allEmps||[]).map(e=>`<option value="${e.id}" ${empId===e.id?'selected':''}>${e.name}</option>`).join('')}
       </select>
+      <span style="font-size:12px;color:var(--text3);margin-left:4px">
+        Showing: <strong style="color:var(--text)">${periodLabel}</strong> · <strong style="color:var(--text)">${empLabel}</strong>
+        ${logs.length>0?`· <strong style="color:var(--text)">${logs.length} records</strong>`:''}
+      </span>
     </div>
+
+    <!-- METRICS -->
     <div class="metrics" style="margin-bottom:18px">
-      <div class="metric-card"><div><div class="metric-label">Total Hours</div><div class="metric-value">${fmtDur(totalSec)}</div></div></div>
-      <div class="metric-card"><div><div class="metric-label">Productive Time</div><div class="metric-value" style="color:var(--green)">${fmtDur(workSec)}</div></div></div>
-      <div class="metric-card"><div><div class="metric-label">Idle Time</div><div class="metric-value" style="color:var(--amber)">${fmtDur(idleSec)}</div></div></div>
-      <div class="metric-card"><div><div class="metric-label">Productivity Score</div><div class="metric-value" style="color:var(--blue)">${score}%</div></div></div>
+      <div class="metric-card">
+        <div><div class="metric-label">Total Hours</div><div class="metric-value">${fmtDur(totalSec)}</div></div>
+        <div class="metric-icon" style="background:var(--bg)"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+      </div>
+      <div class="metric-card">
+        <div><div class="metric-label">Productive Time</div><div class="metric-value" style="color:var(--green)">${fmtDur(workSec)}</div></div>
+        <div class="metric-icon" style="background:var(--green-bg)"><svg fill="none" stroke="var(--green)" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+      </div>
+      <div class="metric-card">
+        <div><div class="metric-label">Idle Time</div><div class="metric-value" style="color:var(--amber)">${fmtDur(idleSec)}</div></div>
+        <div class="metric-icon" style="background:var(--amber-bg)"><svg fill="none" stroke="var(--amber)" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg></div>
+      </div>
+      <div class="metric-card">
+        <div><div class="metric-label">Productivity Score</div><div class="metric-value" style="color:var(--blue)">${score}%</div></div>
+        <div class="metric-icon" style="background:var(--blue-bg)"><svg fill="none" stroke="var(--blue)" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div>
+      </div>
     </div>
+
+    <!-- CHARTS ROW -->
     <div class="analytics-grid">
-      <div class="chart-wrap"><div class="chart-title">Daily Activity Breakdown</div><div class="bar-chart">${barChart}</div>
-        <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text2)">
-          <span><span style="display:inline-block;width:8px;height:8px;background:var(--green);border-radius:2px;margin-right:4px"></span>Working</span>
-          <span><span style="display:inline-block;width:8px;height:8px;background:var(--amber);border-radius:2px;margin-right:4px"></span>Idle</span>
-        </div>
+      <div class="chart-wrap">
+        <div class="chart-title">Daily Activity Breakdown</div>
+        ${totalSec===0
+          ? `<div class="empty" style="padding:32px">No data for this period</div>`
+          : `<div class="bar-chart">${barChart}</div>
+             <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text2)">
+               <span><span style="display:inline-block;width:8px;height:8px;background:var(--green);border-radius:2px;margin-right:4px"></span>Working</span>
+               <span><span style="display:inline-block;width:8px;height:8px;background:var(--amber);border-radius:2px;margin-right:4px"></span>Idle</span>
+             </div>`
+        }
       </div>
-      <div class="chart-wrap"><div class="chart-title">Working vs Idle Distribution</div>
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:130px">
-          <svg width="120" height="120" viewBox="0 0 42 42">
-            <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="var(--border)" stroke-width="5"/>
-            <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#15803d" stroke-width="5"
-              stroke-dasharray="${score} ${100-score}" stroke-dashoffset="25" transform="rotate(-90 21 21)"/>
-          </svg>
-          <div style="text-align:center;margin-top:8px"><div style="font-size:22px;font-weight:600">${score}%</div><div style="font-size:11px;color:var(--text2)">productive</div></div>
-        </div>
+      <div class="chart-wrap">
+        <div class="chart-title">Working vs Idle Distribution</div>
+        ${totalSec===0
+          ? `<div class="empty" style="padding:32px">No data for this period</div>`
+          : `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:130px">
+              <svg width="120" height="120" viewBox="0 0 42 42">
+                <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="var(--border)" stroke-width="5"/>
+                <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#15803d" stroke-width="5"
+                  stroke-dasharray="${score} ${100-score}" stroke-dashoffset="25" transform="rotate(-90 21 21)"/>
+                <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#b45309" stroke-width="5"
+                  stroke-dasharray="${Math.round(idleSec/Math.max(totalSec,1)*100)} 100"
+                  stroke-dashoffset="${-(score)}" transform="rotate(-90 21 21)"/>
+              </svg>
+              <div style="text-align:center;margin-top:8px">
+                <div style="font-size:22px;font-weight:600">${score}%</div>
+                <div style="font-size:11px;color:var(--text2)">productive</div>
+              </div>
+              <div style="display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--text2)">
+                <span><span style="display:inline-block;width:8px;height:8px;background:var(--green);border-radius:2px;margin-right:4px"></span>Working ${score}%</span>
+                <span><span style="display:inline-block;width:8px;height:8px;background:var(--amber);border-radius:2px;margin-right:4px"></span>Idle ${Math.round(idleSec/Math.max(totalSec,1)*100)}%</span>
+              </div>
+            </div>`
+        }
       </div>
     </div>
-    <div class="table-card" style="margin-bottom:16px"><div class="table-hdr"><div class="table-title">Application Usage Time</div></div>
-      <table><thead><tr><th>Application</th><th>Total Time</th><th>% of Work Time</th><th>Status</th></tr></thead>
-      <tbody>${appRows||'<tr><td colspan="4"><div class="empty">No data yet</div></td></tr>'}</tbody></table>
+
+    <!-- APP USAGE TABLE -->
+    <div class="table-card" style="margin-bottom:16px">
+      <div class="table-hdr"><div class="table-title">Application Usage Time</div></div>
+      ${totalSec===0
+        ? `<div class="empty" style="padding:32px">No application data for this period</div>`
+        : `<table><thead><tr><th>Application</th><th>Total Time</th><th>% of Work Time</th><th>Status</th></tr></thead>
+           <tbody>${appRows}</tbody></table>`
+      }
     </div>
-    <div class="table-card"><div class="table-hdr"><div class="table-title">Employee Productivity Ranking</div></div>
-      <table><thead><tr><th>#</th><th>Employee</th><th>Hours</th><th>Productivity</th></tr></thead>
-      <tbody>${rankRows||'<tr><td colspan="4"><div class="empty">No data yet</div></td></tr>'}</tbody></table>
-    </div></div>`;
+
+    <!-- RANKING TABLE -->
+    <div class="table-card">
+      <div class="table-hdr"><div class="table-title">Employee Productivity Ranking</div></div>
+      ${rankRows
+        ? `<table><thead><tr><th>#</th><th>Employee</th><th>Hours</th><th>Productivity</th></tr></thead>
+           <tbody>${rankRows}</tbody></table>`
+        : `<div class="empty" style="padding:32px">No data for this period</div>`
+      }
+    </div>
+  </div>`;
 }
 
 // ── AGENT DOWNLOAD ──────────────────────────────
@@ -1076,6 +1215,36 @@ function saveConfig(){
 
 function pillActive(el){document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));el.classList.add('active');}
 
+async function setAnalyticsPeriod(period){
+  S.analyticsPeriod = period;
+  saveState(S);
+  // Update pill UI immediately
+  document.querySelectorAll('.filter-row .pill').forEach(p=>{
+    p.classList.toggle('active', p.textContent.trim() === {today:'Today',week:'This Week',month:'This Month'}[period]);
+  });
+  // Re-render analytics content only (no loading flash)
+  const el = document.getElementById('main');
+  if(el) el.innerHTML = await renderAnalytics();
+  attachHandlers();
+}
+
+async function setAnalyticsEmp(empId){
+  S.analyticsEmp = empId;
+  saveState(S);
+  const el = document.getElementById('main');
+  if(el) el.innerHTML = await renderAnalytics();
+  attachHandlers();
+}
+async function doExportAnalytics(){
+  const {logs}=await fetchAnalytics(S.analyticsPeriod||'week', S.analyticsEmp||'all');
+  if(!logs.length){toast('No data to export');return;}
+  const rows=[['Employee ID','App','Status','Duration(s)','Time'],...logs.map(l=>[l.employee_id,l.app_name,l.status,l.duration_seconds,l.logged_at])];
+  const csv=rows.map(r=>r.map(c=>`"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download='analytics_'+(S.analyticsPeriod||'week')+'_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click();toast('Analytics exported');
+}
+
 function toggleApiKey(id,key){
   const el=document.getElementById('apk-'+id);
   if(el) el.textContent=el.textContent.includes('•')?key:'••••••••••••';
@@ -1096,7 +1265,7 @@ async function exportCSV(id){
   a.download=`activity_${id}.csv`;a.click();toast('CSV exported');
 }
 
-function exportAnalytics(){toast('Exporting analytics...');}
+
 
 async function showAddEmp(){
   document.getElementById('modal-inner').innerHTML=`
