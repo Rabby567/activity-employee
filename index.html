@@ -546,8 +546,10 @@ function configBanner(){
 }
 
 // ── NAVIGATION ──────────────────────────────────
-function nav(page){
-  S.page=page; S.empView='list'; saveState(S);
+function nav(page, resetEmpView=true){
+  S.page=page;
+  if(resetEmpView) S.empView='list';
+  saveState(S);
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
   renderMain();
 }
@@ -864,7 +866,15 @@ async function renderEmpDetail(){
   </div>`;
 }
 
-function openEmp(id){S.selectedEmp=id;S.empView='detail';S.empTab='activity';saveState(S);nav('employees');}
+function openEmp(id){
+  S.selectedEmp=id;
+  S.empView='detail';
+  S.empTab='activity';
+  S.page='employees';
+  saveState(S);
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page==='employees'));
+  renderMain();
+}
 
 // ── ANALYTICS ──────────────────────────────────
 async function renderAnalytics(){
