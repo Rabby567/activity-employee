@@ -238,9 +238,11 @@ const STORE = 'at_state_v2';
 function loadState(){try{return JSON.parse(localStorage.getItem(STORE)||'null');}catch(e){return null;}}
 function saveState(s){localStorage.setItem(STORE,JSON.stringify(s));}
 
-let S = loadState() || {dark:false, page:'dashboard', empView:'list', selectedEmp:null, empTab:'activity', analyticsPeriod:'week', analyticsEmp:'all'};
+let S = loadState() || {dark:false, page:'dashboard', empView:'list', selectedEmp:null, empTab:'activity', analyticsPeriod:'week', analyticsEmp:'all', analyticsFrom:'', analyticsTo:''};
 if(!S.analyticsPeriod) S.analyticsPeriod='week';
 if(!S.analyticsEmp)    S.analyticsEmp='all';
+if(!S.analyticsFrom)   S.analyticsFrom='';
+if(!S.analyticsTo)     S.analyticsTo='';
 const isConfigured = ()=> SUPABASE_URL && SUPABASE_ANON_KEY && !SUPABASE_URL.includes('YOUR_PROJECT');
 
 // ── IN-MEMORY CACHE (updated by real-time) ────────
@@ -473,31 +475,41 @@ async function fetchScreenshots(empId, limit=12){
   return data || [];
 }
 
-async function fetchAnalytics(period='week', empId='all'){
+async function fetchAnalytics(period='week', empId='all', customFrom='', customTo=''){
   const allEmps = await fetchEmployees();
 
   // Build date range
   const now = new Date();
-  let fromDate;
-  if(period==='today'){
+  let fromDate, toDate;
+
+  if(period==='custom' && customFrom){
+    fromDate = new Date(customFrom + 'T00:00:00');
+    toDate   = customTo ? new Date(customTo + 'T23:59:59') : new Date();
+  } else if(period==='today'){
     fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    toDate   = new Date();
   } else if(period==='week'){
     const day = now.getDay();
     fromDate = new Date(now); fromDate.setDate(now.getDate()-day); fromDate.setHours(0,0,0,0);
+    toDate   = new Date();
   } else if(period==='month'){
     fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    toDate   = new Date();
   } else {
-    fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()-6);
+    // default week
+    const day = now.getDay();
+    fromDate = new Date(now); fromDate.setDate(now.getDate()-day); fromDate.setHours(0,0,0,0);
+    toDate   = new Date();
   }
 
   if(!isConfigured()){
-    // Filter demo data by period and employee
     let logs = demoActivity();
-    logs = logs.filter(l=> new Date(l.logged_at) >= fromDate);
-    if(empId !== 'all'){
-      logs = logs.map(l=>({...l, employee_id: empId})); // assign to selected emp in demo
-    } else {
-      // distribute demo logs across demo employees
+    logs = logs.filter(l=>{
+      const t = new Date(l.logged_at);
+      return t >= fromDate && (!toDate || t <= toDate);
+    });
+    if(empId !== 'all') logs = logs.map(l=>({...l, employee_id: empId}));
+    else {
       const empIds = allEmps.map(e=>e.id);
       logs = logs.map((l,i)=>({...l, employee_id: empIds[i % empIds.length]}));
     }
@@ -511,11 +523,16 @@ async function fetchAnalytics(period='week', empId='all'){
     order: 'logged_at.desc',
     limit: 2000
   };
+  if(toDate) params['logged_at'] = 'gte.'+fromDate.toISOString();
+  // Supabase supports range with two params — use &and= for upper bound
   if(empId !== 'all') params.employee_id = 'eq.'+empId;
 
-  const logs = await sb('GET','activity_logs',null,params);
+  let logs = await sb('GET','activity_logs',null,params) || [];
+  // Apply upper date bound client-side (simple & reliable)
+  if(toDate) logs = logs.filter(l=> new Date(l.logged_at) <= toDate);
+
   const filteredEmps = empId==='all' ? allEmps : allEmps.filter(e=>e.id===empId);
-  return {emps: filteredEmps, allEmps, logs: logs||[]};
+  return {emps: filteredEmps, allEmps, logs};
 }
 
 async function addEmployee(data){
@@ -916,8 +933,10 @@ function openEmp(id){
 async function renderAnalytics(){
   const period = S.analyticsPeriod || 'week';
   const empId  = S.analyticsEmp    || 'all';
+  const customFrom = S.analyticsFrom || '';
+  const customTo   = S.analyticsTo   || '';
 
-  const {emps, allEmps, logs} = await fetchAnalytics(period, empId);
+  const {emps, allEmps, logs} = await fetchAnalytics(period, empId, customFrom, customTo);
 
   const totalSec = logs.reduce((s,l)=>s+(l.duration_seconds||0),0);
   const workSec  = logs.filter(l=>l.status==='online').reduce((s,l)=>s+(l.duration_seconds||0),0);
@@ -994,8 +1013,11 @@ async function renderAnalytics(){
     </tr>`;
   }).join('');
 
-  const periodLabel = {today:'Today',week:'This Week',month:'This Month'}[period]||'This Week';
-  const empLabel    = empId==='all'?'All Employees':((allEmps||[]).find(e=>e.id===empId)?.name||'Employee');
+  const periodLabel = period==='custom'
+    ? (customFrom ? customFrom+(customTo?' → '+customTo:'') : 'Custom')
+    : {today:'Today',week:'This Week',month:'This Month'}[period]||'This Week';
+  const empLabel = empId==='all'?'All Employees':((allEmps||[]).find(e=>e.id===empId)?.name||'Employee');
+  const calendarIcon = `<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="14" height="14"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
 
   return `
   <div class="topbar">
@@ -1009,19 +1031,47 @@ async function renderAnalytics(){
   <div class="content">${configBanner()}
 
     <!-- FILTERS -->
-    <div class="filter-row">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;flex-wrap:wrap;position:relative">
+
+      <!-- Period pills -->
       <button class="pill ${period==='today'?'active':''}" onclick="setAnalyticsPeriod('today')">Today</button>
       <button class="pill ${period==='week'?'active':''}"  onclick="setAnalyticsPeriod('week')">This Week</button>
       <button class="pill ${period==='month'?'active':''}" onclick="setAnalyticsPeriod('month')">This Month</button>
+      <button class="pill ${period==='custom'?'active':''}" onclick="setAnalyticsPeriod('custom')" id="custom-pill">Custom</button>
+
+      <!-- Custom date inputs — shown only when Custom is active -->
+      <div id="custom-date-wrap" style="display:${period==='custom'?'flex':'none'};align-items:center;gap:6px">
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--border2);border-radius:20px;background:var(--card);cursor:pointer;position:relative"
+             onclick="document.getElementById('cal-from').showPicker&&document.getElementById('cal-from').showPicker()">
+          ${calendarIcon}
+          <input type="date" id="cal-from" value="${customFrom}"
+            style="border:none;outline:none;background:transparent;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;cursor:pointer;width:110px"
+            onchange="setCustomDate('from',this.value)"/>
+        </div>
+        <span style="font-size:12px;color:var(--text3)">→</span>
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--border2);border-radius:20px;background:var(--card);cursor:pointer"
+             onclick="document.getElementById('cal-to').showPicker&&document.getElementById('cal-to').showPicker()">
+          ${calendarIcon}
+          <input type="date" id="cal-to" value="${customTo}"
+            style="border:none;outline:none;background:transparent;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;cursor:pointer;width:110px"
+            onchange="setCustomDate('to',this.value)"/>
+        </div>
+        ${(customFrom||customTo)?`<button class="pill" onclick="clearCustomDates()" style="padding:5px 10px;font-size:11px;color:var(--red)">✕ Clear</button>`:''}
+      </div>
+
+      <!-- Employee selector -->
       <select id="analytics-emp-select"
         style="padding:6px 14px;border-radius:20px;border:1px solid var(--border2);background:var(--card);color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;outline:none;cursor:pointer"
         onchange="setAnalyticsEmp(this.value)">
         <option value="all" ${empId==='all'?'selected':''}>All Employees</option>
         ${(allEmps||[]).map(e=>`<option value="${e.id}" ${empId===e.id?'selected':''}>${e.name}</option>`).join('')}
       </select>
+
+      <!-- Active filter summary -->
       <span style="font-size:12px;color:var(--text3);margin-left:4px">
-        Showing: <strong style="color:var(--text)">${periodLabel}</strong> · <strong style="color:var(--text)">${empLabel}</strong>
-        ${logs.length>0?`· <strong style="color:var(--text)">${logs.length} records</strong>`:''}
+        <strong style="color:var(--text)">${periodLabel}</strong>
+        · <strong style="color:var(--text)">${empLabel}</strong>
+        ${logs.length>0?`· <strong style="color:var(--text)">${logs.length} records</strong>`:'· No data'}
       </span>
     </div>
 
@@ -1217,12 +1267,8 @@ function pillActive(el){document.querySelectorAll('.pill').forEach(p=>p.classLis
 
 async function setAnalyticsPeriod(period){
   S.analyticsPeriod = period;
+  if(period !== 'custom'){ S.analyticsFrom=''; S.analyticsTo=''; }
   saveState(S);
-  // Update pill UI immediately
-  document.querySelectorAll('.filter-row .pill').forEach(p=>{
-    p.classList.toggle('active', p.textContent.trim() === {today:'Today',week:'This Week',month:'This Month'}[period]);
-  });
-  // Re-render analytics content only (no loading flash)
   const el = document.getElementById('main');
   if(el) el.innerHTML = await renderAnalytics();
   attachHandlers();
@@ -1235,8 +1281,30 @@ async function setAnalyticsEmp(empId){
   if(el) el.innerHTML = await renderAnalytics();
   attachHandlers();
 }
+
+async function setCustomDate(which, val){
+  if(which==='from') S.analyticsFrom = val;
+  if(which==='to')   S.analyticsTo   = val;
+  S.analyticsPeriod = 'custom';
+  saveState(S);
+  // Only re-render when both dates are set, or if clearing
+  if(S.analyticsFrom && S.analyticsTo){
+    const el = document.getElementById('main');
+    if(el) el.innerHTML = await renderAnalytics();
+    attachHandlers();
+  }
+}
+
+async function clearCustomDates(){
+  S.analyticsFrom=''; S.analyticsTo='';
+  S.analyticsPeriod='week';
+  saveState(S);
+  const el = document.getElementById('main');
+  if(el) el.innerHTML = await renderAnalytics();
+  attachHandlers();
+}
 async function doExportAnalytics(){
-  const {logs}=await fetchAnalytics(S.analyticsPeriod||'week', S.analyticsEmp||'all');
+  const {logs}=await fetchAnalytics(S.analyticsPeriod||'week', S.analyticsEmp||'all', S.analyticsFrom||'', S.analyticsTo||'');
   if(!logs.length){toast('No data to export');return;}
   const rows=[['Employee ID','App','Status','Duration(s)','Time'],...logs.map(l=>[l.employee_id,l.app_name,l.status,l.duration_seconds,l.logged_at])];
   const csv=rows.map(r=>r.map(c=>`"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
