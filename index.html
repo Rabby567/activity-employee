@@ -912,27 +912,115 @@ async function renderEmpDetail(){
     </div>`;
 
   // ── Screenshots Tab ──
-  const shotTab = shots.length === 0
-    ? `<div style="text-align:center;padding:56px 20px;color:var(--text3)">
-        <div style="font-size:40px;margin-bottom:12px">📷</div>
-        <div style="font-size:14px;font-weight:500;margin-bottom:6px">No screenshots yet</div>
-        <div style="font-size:12px">Screenshots are captured automatically every 5 minutes by the desktop agent.</div>
-      </div>`
-    : `<div style="padding:14px 4px 4px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-          <div style="font-size:13px;font-weight:600">${shots.length} Screenshot${shots.length!==1?'s':''}</div>
-          <div style="font-size:12px;color:var(--text3)">Captured every 5 minutes</div>
+  const shotTab = `<div style="padding:4px 0">
+    ${shots.length === 0 ? `
+      <!-- No screenshots state with setup guide -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+
+        <!-- Setup steps -->
+        <div style="background:var(--bg);border-radius:12px;padding:18px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:14px">📋 Setup Checklist</div>
+
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--card);border-radius:8px;border:1px solid var(--border)">
+              <span style="font-size:16px;flex-shrink:0">1️⃣</span>
+              <div>
+                <div style="font-size:12px;font-weight:600;margin-bottom:3px">Create Supabase Storage bucket</div>
+                <div style="font-size:11px;color:var(--text2)">Go to <strong>Supabase → Storage → New bucket</strong></div>
+                <div style="font-family:'DM Mono',monospace;font-size:11px;background:var(--bg);padding:4px 8px;border-radius:4px;margin-top:4px;color:var(--text2)">Name: screenshots &nbsp;|&nbsp; Public: ✓ ON</div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--card);border-radius:8px;border:1px solid var(--border)">
+              <span style="font-size:16px;flex-shrink:0">2️⃣</span>
+              <div>
+                <div style="font-size:12px;font-weight:600;margin-bottom:3px">Run this SQL in Supabase SQL Editor</div>
+                <div style="font-family:'DM Mono',monospace;font-size:10px;background:var(--bg);padding:6px 8px;border-radius:4px;margin-top:4px;color:var(--text2);line-height:1.6;white-space:pre">insert into storage.buckets (id,name,public)
+values ('screenshots','screenshots',true)
+on conflict (id) do update set public=true;</div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--card);border-radius:8px;border:1px solid var(--border)">
+              <span style="font-size:16px;flex-shrink:0">3️⃣</span>
+              <div>
+                <div style="font-size:12px;font-weight:600;margin-bottom:3px">Install Pillow on employee PC</div>
+                <div style="font-family:'DM Mono',monospace;font-size:11px;background:var(--bg);padding:4px 8px;border-radius:4px;margin-top:4px;color:var(--text2)">pip install pillow pywin32</div>
+                <div style="font-size:11px;color:var(--text2);margin-top:4px">Then restart the agent — first screenshot taken after 10 seconds</div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--card);border-radius:8px;border:1px solid var(--border)">
+              <span style="font-size:16px;flex-shrink:0">4️⃣</span>
+              <div>
+                <div style="font-size:12px;font-weight:600;margin-bottom:3px">Set Storage Policy (allow uploads)</div>
+                <div style="font-size:11px;color:var(--text2)">Go to <strong>Supabase → Storage → Policies</strong> and add:</div>
+                <div style="font-family:'DM Mono',monospace;font-size:10px;background:var(--bg);padding:5px 8px;border-radius:4px;margin-top:4px;color:var(--text2);line-height:1.6;white-space:pre">Policy: Allow all operations
+Bucket: screenshots
+Role: anon
+Expression: true</div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
-          ${shots.map(s=>`
-            <div style="border-radius:8px;overflow:hidden;border:1px solid var(--border);cursor:pointer;transition:opacity .15s" onclick="window.open('${s.file_url}','_blank')" title="Click to open full size">
-              <img src="${s.file_url}" alt="screenshot"
-                style="width:100%;height:130px;object-fit:cover;display:block;background:var(--bg)"
-                onerror="this.parentElement.innerHTML='<div style=\\'height:130px;display:flex;align-items:center;justify-content:center;background:var(--bg);font-size:12px;color:var(--text3)\\'>Image unavailable</div>'"/>
-              <div style="padding:6px 9px;font-size:10px;color:var(--text3);font-family:DM Mono,monospace;border-top:1px solid var(--border);background:var(--card)">${fmtTime(s.taken_at)}</div>
-            </div>`).join('')}
+
+        <!-- Manual upload + test -->
+        <div style="background:var(--bg);border-radius:12px;padding:18px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">🧪 Test Manual Upload</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:14px">Upload a screenshot manually to test if storage is working</div>
+
+          <div id="upload-zone"
+            style="border:2px dashed var(--border2);border-radius:10px;padding:28px 16px;text-align:center;cursor:pointer;transition:all .2s"
+            onclick="document.getElementById('shot-file-input').click()"
+            ondragover="event.preventDefault();this.style.borderColor='var(--blue)'"
+            ondragleave="this.style.borderColor='var(--border2)'"
+            ondrop="event.preventDefault();this.style.borderColor='var(--border2)';handleScreenshotDrop(event,'${e.id}')">
+            <div style="font-size:28px;margin-bottom:8px">📁</div>
+            <div style="font-size:13px;font-weight:500;margin-bottom:4px">Click or drag a screenshot here</div>
+            <div style="font-size:11px;color:var(--text3)">JPG, PNG supported</div>
+          </div>
+          <input type="file" id="shot-file-input" accept="image/*" style="display:none"
+            onchange="uploadScreenshotManual(this.files[0],'${e.id}')"/>
+
+          <div id="upload-status" style="margin-top:12px;font-size:12px;color:var(--text2);min-height:20px"></div>
+
+          <div style="margin-top:14px;padding:12px;background:var(--card);border-radius:8px;border:1px solid var(--border)">
+            <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:6px">Check agent console for errors:</div>
+            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text3);line-height:1.7">
+              [Agent] Screenshot captured: 245180 bytes<br>
+              [Agent] Storage upload status: 200<br>
+              [Agent] Screenshot saved: https://...
+            </div>
+          </div>
         </div>
-      </div>`;
+      </div>` : `
+      <!-- Screenshots grid -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 12px">
+        <div style="font-size:13px;font-weight:600">${shots.length} Screenshot${shots.length!==1?'s':''}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:12px;color:var(--text3)">Auto-captured every 5 min</span>
+          <button class="btn btn-sm" onclick="document.getElementById('shot-file-input-grid').click()">+ Upload</button>
+          <input type="file" id="shot-file-input-grid" accept="image/*" style="display:none"
+            onchange="uploadScreenshotManual(this.files[0],'${e.id}')"/>
+        </div>
+      </div>
+      <div id="upload-status" style="font-size:12px;color:var(--text2);margin-bottom:10px;min-height:16px"></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px" id="shots-grid">
+        ${shots.map(s=>`
+          <div style="border-radius:8px;overflow:hidden;border:1px solid var(--border);cursor:pointer;transition:all .15s"
+            onclick="window.open('${s.file_url}','_blank')" title="Click to view full size">
+            <img src="${s.file_url}" alt="screenshot"
+              style="width:100%;height:140px;object-fit:cover;display:block;background:var(--bg)"
+              onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
+            <div style="height:140px;display:none;align-items:center;justify-content:center;background:var(--bg);font-size:12px;color:var(--text3);flex-direction:column;gap:6px">
+              <span>🚫</span>Image unavailable
+            </div>
+            <div style="padding:6px 9px;font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;border-top:1px solid var(--border);background:var(--card)">
+              ${fmtTime(s.taken_at)}
+            </div>
+          </div>`).join('')}
+      </div>`}
+  </div>`;
 
   const tabContent = {activity:actTab, charts:chartTab, screenshots:shotTab}[S.empTab] || actTab;
 
@@ -1411,6 +1499,60 @@ function toggleApiKey(id,key){
   if(el) el.textContent=el.textContent.includes('•')?key:'••••••••••••';
 }
 
+function handleScreenshotDrop(event, empId){
+  const file = event.dataTransfer.files[0];
+  if(file) uploadScreenshotManual(file, empId);
+}
+
+async function uploadScreenshotManual(file, empId){
+  if(!file || !isConfigured()){toast('Configure Supabase first');return;}
+  const statusEl = document.getElementById('upload-status');
+  if(statusEl) statusEl.textContent = '⏳ Uploading...';
+
+  try{
+    const SB_URL = localStorage.getItem('at_url');
+    const SB_KEY = localStorage.getItem('at_key');
+    const ts = new Date().toISOString().replace(/[:.]/g,'').slice(0,15);
+    const path = empId + '/' + ts + '.jpg';
+    const uploadUrl = SB_URL + '/storage/v1/object/screenshots/' + path;
+
+    // Convert to blob
+    const arrayBuf = await file.arrayBuffer();
+
+    const r = await fetch(uploadUrl, {
+      method:'POST',
+      headers:{
+        'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + SB_KEY,
+        'Content-Type': file.type||'image/jpeg',
+        'x-upsert': 'true'
+      },
+      body: arrayBuf
+    });
+
+    if(!r.ok){
+      const err = await r.text();
+      if(statusEl) statusEl.innerHTML = '<span style="color:var(--red)">❌ Upload failed ('+r.status+'): '+err.slice(0,100)+'<br>→ Check bucket exists and is public in Supabase Storage</span>';
+      return;
+    }
+
+    const fileUrl = SB_URL + '/storage/v1/object/public/screenshots/' + path;
+
+    // Save to screenshots table
+    const now = new Date().toISOString();
+    await sb('POST','screenshots',{employee_id:empId, file_path:path, file_url:fileUrl, taken_at:now});
+
+    if(statusEl) statusEl.innerHTML = '<span style="color:var(--green)">✓ Screenshot uploaded successfully!</span>';
+    toast('Screenshot uploaded!');
+
+    // Reload screenshots tab
+    setTimeout(()=>{ S.empTab='screenshots'; renderMain(); }, 1200);
+
+  } catch(err){
+    if(statusEl) statusEl.innerHTML = '<span style="color:var(--red)">❌ Error: '+err.message+'</span>';
+  }
+}
+
 async function deleteEmp(id){
   if(!confirm('Delete this employee and all their data?')) return;
   await deleteEmployee(id);
@@ -1583,32 +1725,74 @@ async function downloadPersonalized(){
     '        print("[Agent] Log error: " + str(e))',
     '',
     'def take_and_upload_screenshot(employee_id):',
+    '    """Capture screen and upload to Supabase Storage."""',
+    '    # Step 1: Capture screenshot',
+    '    image_bytes = None',
     '    try:',
     '        from PIL import ImageGrab',
-    '        img = ImageGrab.grab()',
-    '        img.thumbnail((1280, 720))',
+    '        try:',
+    '            img = ImageGrab.grab(all_screens=True)  # multi-monitor',
+    '        except TypeError:',
+    '            img = ImageGrab.grab()  # older Pillow fallback',
+    '        img.thumbnail((1280, 800))',
     '        buf = io.BytesIO()',
-    '        img.save(buf, format="JPEG", quality=60)',
+    '        img.save(buf, format="JPEG", quality=70)',
     '        buf.seek(0)',
     '        image_bytes = buf.read()',
-    '        ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")',
-    '        path = employee_id + "/" + ts + ".jpg"',
-    '        url = SUPABASE_URL + "/storage/v1/object/screenshots/" + path',
-    '        hdrs = {"apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "image/jpeg"}',
-    '        r = requests.post(url, headers=hdrs, data=image_bytes, timeout=30)',
-    '        if r.status_code in [200, 201]:',
-    '            file_url = SUPABASE_URL + "/storage/v1/object/public/screenshots/" + path',
-    '            requests.post(SUPABASE_URL + "/rest/v1/screenshots",',
-    '                headers={**HEADERS, "Prefer": "return=minimal"},',
-    '                json={"employee_id": employee_id, "file_path": path, "file_url": file_url},',
-    '                timeout=10)',
-    '            print("[Agent] Screenshot uploaded: " + ts)',
+    '        print("[Agent] Screenshot captured: " + str(len(image_bytes)) + " bytes")',
     '    except ImportError:',
-    '        pass',
+    '        print("[Agent] WARNING: Pillow not installed. Run: pip install pillow")',
+    '        return',
     '    except Exception as e:',
-    '        print("[Agent] Screenshot error: " + str(e))',
+    '        print("[Agent] Screenshot capture error: " + str(e))',
+    '        return',
+    '',
+    '    if not image_bytes:',
+    '        return',
+    '',
+    '    # Step 2: Upload to Supabase Storage',
+    '    try:',
+    '        ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")',
+    '        filename = ts + ".jpg"',
+    '        path = employee_id + "/" + filename',
+    '        upload_url = SUPABASE_URL + "/storage/v1/object/screenshots/" + path',
+    '        hdrs = {',
+    '            "apikey": SUPABASE_ANON_KEY,',
+    '            "Authorization": "Bearer " + SUPABASE_ANON_KEY,',
+    '            "Content-Type": "image/jpeg",',
+    '            "x-upsert": "true"',
+    '        }',
+    '        r = requests.post(upload_url, headers=hdrs, data=image_bytes, timeout=60)',
+    '        print("[Agent] Storage upload status: " + str(r.status_code))',
+    '        if r.status_code not in [200, 201]:',
+    '            print("[Agent] Storage error: " + r.text[:200])',
+    '            print("[Agent] Make sure the screenshots bucket exists in Supabase Storage (public bucket)")',
+    '            return',
+    '',
+    '        # Step 3: Save record to screenshots table',
+    '        file_url = SUPABASE_URL + "/storage/v1/object/public/screenshots/" + path',
+    '        rec_r = requests.post(',
+    '            SUPABASE_URL + "/rest/v1/screenshots",',
+    '            headers={**HEADERS, "Prefer": "return=minimal"},',
+    '            json={',
+    '                "employee_id": employee_id,',
+    '                "file_path": path,',
+    '                "file_url": file_url,',
+    '                "taken_at": datetime.datetime.utcnow().isoformat() + "Z"',
+    '            },',
+    '            timeout=10',
+    '        )',
+    '        if rec_r.status_code in [200, 201, 204]:',
+    '            print("[Agent] Screenshot saved: " + file_url)',
+    '        else:',
+    '            print("[Agent] DB insert error: " + rec_r.text[:200])',
+    '    except Exception as e:',
+    '        print("[Agent] Screenshot upload error: " + str(e))',
     '',
     'def screenshot_loop(employee_id):',
+    '    """Take screenshots periodically. First one after 10 seconds."""',
+    '    time.sleep(10)  # short delay before first screenshot',
+    '    take_and_upload_screenshot(employee_id)',
     '    while True:',
     '        time.sleep(SCREENSHOT_INTERVAL)',
     '        take_and_upload_screenshot(employee_id)',
