@@ -280,11 +280,22 @@ const PRODUCTIVE_APPS = [
   '.pdf'
 ];
 
-// Returns 'productive' or 'idle' based on app name
 function classifyApp(appName){
   if(!appName) return 'idle';
+
   const lower = appName.toLowerCase();
-  return PRODUCTIVE_APPS.some(k => lower.includes(k)) ? 'productive' : 'idle';
+
+  // 🔥 Extension check (VERY IMPORTANT)
+  if (PRODUCTIVE_EXTENSIONS.some(ext => lower.includes(ext))) {
+    return 'productive';
+  }
+
+  // 🔥 App নাম check
+  if (PRODUCTIVE_APPS.some(k => lower.includes(k))) {
+    return 'productive';
+  }
+
+  return 'idle';
 }
 
 // Reclassify a log array — adds .classified field ('productive'|'idle')
